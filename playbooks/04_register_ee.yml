@@ -1,18 +1,3 @@
-# =============================================================================
-# Register the Execution Environment on Automation Controller
-# =============================================================================
-# Objective: Verify that the EE pushed to the Private Automation Hub can be
-#            registered and used by the Automation Controller.
-#
-# Role: infra.aap_configuration.controller_execution_environments
-# Variable: controller_execution_environments
-#
-# Prerequisites:
-#   - Push EE to Hub test passed
-#   - Credential for Private Automation Hub created
-#
-# Expected output: The EE is saved and selectable in Job Templates.
-# =============================================================================
 ---
 - name: "Register EE on Automation Controller"
   hosts: localhost
@@ -24,9 +9,6 @@
     reports_dir: "{{ playbook_dir }}/../reports/{{ ansible_date_time.date }}"
 
   tasks:
-    # -----------------------------------------------------------------
-    # Obtain OAuth token (standalone mode only)
-    # -----------------------------------------------------------------
     - name: "Obtain OAuth token (standalone mode)"
       ansible.builtin.uri:
         url: "https://{{ aap_hostname }}/api/controller/v2/tokens/"
@@ -46,9 +28,6 @@
       when: _authtoken_res is not skipped
       no_log: true
 
-    # -----------------------------------------------------------------
-    # Load template data (standalone mode)
-    # -----------------------------------------------------------------
     - name: "Find EE templates (standalone mode)"
       ansible.builtin.find:
         paths: "{{ playbook_dir }}/../templates/execution_environments/"
@@ -70,9 +49,6 @@
       ansible.builtin.set_fact:
         _execution_environments: "{{ smoke_execution_environments | default([]) }}"
 
-    # -----------------------------------------------------------------
-    # Register EE via infra.aap_configuration role
-    # -----------------------------------------------------------------
     - name: "Register Execution Environments on Controller"
       ansible.builtin.include_role:
         name: infra.aap_configuration.controller_execution_environments
@@ -80,9 +56,6 @@
         controller_execution_environments: "{{ _execution_environments }}"
         aap_token: "{{ controller_oauthtoken }}"
 
-    # -----------------------------------------------------------------
-    # Verify registration
-    # -----------------------------------------------------------------
     - name: "Verify EE registration on Controller"
       ansible.builtin.uri:
         url: "https://{{ controller_hostname }}/api/controller/v2/execution_environments/?search={{ item.name | urlencode }}"
@@ -98,9 +71,6 @@
         label: "{{ item.name }}"
       register: ee_verify
 
-    # -----------------------------------------------------------------
-    # Report generation
-    # -----------------------------------------------------------------
     - name: "Set report status"
       ansible.builtin.set_fact:
         _overall_status: "{{ 'PASSED' if ee_verify.results | rejectattr('failed', 'false') | list | length == 0 else 'FAILED' }}"

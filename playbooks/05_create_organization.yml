@@ -1,14 +1,3 @@
-# =============================================================================
-# Create an Organization
-# =============================================================================
-# Objective: Verify the Organization creation on AAP 2.6.
-#
-# Role: infra.aap_configuration.controller_organizations
-# Variable: controller_organizations
-#
-# Expected output: The Organization is correctly created and its Details
-#                  tab shows the correct configuration.
-# =============================================================================
 ---
 - name: "Create Organization"
   hosts: localhost
@@ -20,9 +9,6 @@
     reports_dir: "{{ playbook_dir }}/../reports/{{ ansible_date_time.date }}"
 
   tasks:
-    # -----------------------------------------------------------------
-    # Obtain OAuth token (standalone mode only)
-    # -----------------------------------------------------------------
     - name: "Obtain OAuth token (standalone mode)"
       ansible.builtin.uri:
         url: "https://{{ aap_hostname }}/api/controller/v2/tokens/"
@@ -42,9 +28,6 @@
       when: _authtoken_res is not skipped
       no_log: true
 
-    # -----------------------------------------------------------------
-    # Load template data (standalone mode)
-    # -----------------------------------------------------------------
     - name: "Find organization templates (standalone mode)"
       ansible.builtin.find:
         paths: "{{ playbook_dir }}/../templates/organizations/"
@@ -66,9 +49,6 @@
       ansible.builtin.set_fact:
         _organizations: "{{ smoke_organizations | default([]) }}"
 
-    # -----------------------------------------------------------------
-    # Create Organization via infra.aap_configuration role
-    # -----------------------------------------------------------------
     - name: "Create Organizations"
       ansible.builtin.include_role:
         name: infra.aap_configuration.controller_organizations
@@ -76,9 +56,6 @@
         aap_organizations: "{{ _organizations }}"
         aap_token: "{{ controller_oauthtoken }}"
 
-    # -----------------------------------------------------------------
-    # Verify creation
-    # -----------------------------------------------------------------
     - name: "Verify Organization creation"
       ansible.builtin.uri:
         url: "https://{{ controller_hostname }}/api/controller/v2/organizations/?search={{ item.name | urlencode }}"
@@ -94,9 +71,6 @@
         label: "{{ item.name }}"
       register: org_verify
 
-    # -----------------------------------------------------------------
-    # Report generation
-    # -----------------------------------------------------------------
     - name: "Set report status"
       ansible.builtin.set_fact:
         _overall_status: "{{ 'PASSED' if org_verify.results | rejectattr('failed', 'false') | list | length == 0 else 'FAILED' }}"

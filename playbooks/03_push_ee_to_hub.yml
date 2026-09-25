@@ -1,16 +1,3 @@
-# =============================================================================
-# Push the Execution Environment to Private Automation Hub
-# =============================================================================
-# Objective: Verify that the custom EE can be published to the PRIVATE
-#            Automation Hub registry (internal, behind the AAP Gateway).
-#
-# Prerequisites:
-#   - Build Custom EE test passed
-#   - Admin or container repository permissions on Private Automation Hub
-#
-# Expected output: The EE push completes successfully and the EE is visible
-#                  in the Private Automation Hub.
-# =============================================================================
 ---
 - name: "Push EE to Private Automation Hub"
   hosts: localhost
@@ -25,9 +12,6 @@
     ah_ee_namespace: "{{ aap_username }}"
 
   tasks:
-    # -----------------------------------------------------------------
-    # Verify local image exists
-    # -----------------------------------------------------------------
     - name: "Verify local EE image exists"
       ansible.builtin.command:
         cmd: "podman images {{ ee_image_name }}:{{ ee_image_tag }} --format '{{ '{{' }}.ID{{ '}}' }}'"
@@ -35,9 +19,6 @@
       changed_when: false
       failed_when: local_image_check.stdout | trim | length == 0
 
-    # -----------------------------------------------------------------
-    # Login to Private Automation Hub
-    # -----------------------------------------------------------------
     - name: "Login to Private Automation Hub"
       ansible.builtin.command:
         cmd: >-
@@ -50,9 +31,6 @@
       changed_when: false
       no_log: true
 
-    # -----------------------------------------------------------------
-    # Tag and push to Private Hub only
-    # -----------------------------------------------------------------
     - name: "Tag image for Private Automation Hub"
       ansible.builtin.command:
         cmd: >-
@@ -70,9 +48,6 @@
       register: push_result
       timeout: 300
 
-    # -----------------------------------------------------------------
-    # Verify image on Private Hub
-    # -----------------------------------------------------------------
     - name: "Verify EE is visible on Private Automation Hub"
       ansible.builtin.uri:
         url: "https://{{ aap_hostname }}/api/galaxy/v3/plugin/execution-environments/repositories/{{ ah_ee_namespace }}/{{ ee_image_name }}/"
@@ -85,9 +60,6 @@
       register: hub_verify
       ignore_errors: true
 
-    # -----------------------------------------------------------------
-    # Report generation
-    # -----------------------------------------------------------------
     - name: "Set report status"
       ansible.builtin.set_fact:
         _overall_status: "{{ 'PASSED' if push_result is success else 'FAILED' }}"

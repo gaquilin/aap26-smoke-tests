@@ -1,24 +1,3 @@
-# =============================================================================
-# Cleanup - Remove All Smoke Test Resources from AAP 2.6
-# =============================================================================
-# Objective: Delete all resources created by the smoke test suite, proceeding
-#            from child resources to parent resources to respect dependencies.
-#
-# Deletion order (child first):
-#   1. Workflow Job Templates
-#   2. Job Templates
-#   3. Inventory Sources
-#   4. Hosts
-#   5. Inventories
-#   6. Projects
-#   7. Credentials
-#   8. Credential Types
-#   9. Execution Environments
-#  10. Organizations
-#
-# Run with:
-#   ansible-playbook playbooks/99_cleanup.yml
-# =============================================================================
 ---
 - name: "Cleanup - Remove All Smoke Test Resources"
   hosts: localhost
@@ -31,9 +10,6 @@
     templates_dir: "{{ playbook_dir }}/../templates"
 
   tasks:
-    # -----------------------------------------------------------------
-    # Obtain OAuth token
-    # -----------------------------------------------------------------
     - name: "Obtain OAuth token"
       ansible.builtin.uri:
         url: "https://{{ aap_hostname }}/api/controller/v2/tokens/"
@@ -52,9 +28,6 @@
         controller_oauthtoken_url: "{{ _authtoken_res.json.url }}"
       no_log: true
 
-    # -----------------------------------------------------------------
-    # Load all template data to know what to delete
-    # -----------------------------------------------------------------
     - name: "Scan template files"
       ansible.builtin.find:
         paths: "{{ templates_dir }}"
@@ -134,13 +107,6 @@
           - "Execution Environments: {{ _execution_environments | length }}"
           - "Organizations:          {{ _organizations | length }}"
 
-    # =================================================================
-    # DELETION - Child to Parent order
-    # =================================================================
-
-    # -----------------------------------------------------------------
-    # 1. Delete Workflow Job Templates
-    # -----------------------------------------------------------------
     - name: "Delete Workflow Job Templates"
       ansible.controller.workflow_job_template:
         name: "{{ item.name }}"
@@ -155,9 +121,6 @@
       register: _del_workflows
       ignore_errors: true
 
-    # -----------------------------------------------------------------
-    # 2. Delete Job Templates
-    # -----------------------------------------------------------------
     - name: "Delete Job Templates"
       ansible.controller.job_template:
         name: "{{ item.name }}"
@@ -172,9 +135,6 @@
       register: _del_job_templates
       ignore_errors: true
 
-    # -----------------------------------------------------------------
-    # 3. Delete Inventory Sources
-    # -----------------------------------------------------------------
     - name: "Delete Inventory Sources"
       ansible.controller.inventory_source:
         name: "{{ item.name }}"
@@ -189,9 +149,6 @@
       register: _del_inv_sources
       ignore_errors: true
 
-    # -----------------------------------------------------------------
-    # 4. Delete Hosts
-    # -----------------------------------------------------------------
     - name: "Delete Hosts"
       ansible.controller.host:
         name: "{{ item.name }}"
@@ -206,9 +163,6 @@
       register: _del_hosts
       ignore_errors: true
 
-    # -----------------------------------------------------------------
-    # 5. Delete Inventories
-    # -----------------------------------------------------------------
     - name: "Delete Inventories"
       ansible.controller.inventory:
         name: "{{ item.name }}"
@@ -223,9 +177,6 @@
       register: _del_inventories
       ignore_errors: true
 
-    # -----------------------------------------------------------------
-    # 6. Delete Projects
-    # -----------------------------------------------------------------
     - name: "Delete Projects"
       ansible.controller.project:
         name: "{{ item.name }}"
@@ -240,9 +191,6 @@
       register: _del_projects
       ignore_errors: true
 
-    # -----------------------------------------------------------------
-    # 7. Delete Credentials
-    # -----------------------------------------------------------------
     - name: "Delete Credentials"
       ansible.controller.credential:
         name: "{{ item.name }}"
@@ -258,9 +206,6 @@
       register: _del_credentials
       ignore_errors: true
 
-    # -----------------------------------------------------------------
-    # 8. Delete Credential Types
-    # -----------------------------------------------------------------
     - name: "Delete Credential Types"
       ansible.controller.credential_type:
         name: "{{ item.name }}"
@@ -275,9 +220,6 @@
       register: _del_credential_types
       ignore_errors: true
 
-    # -----------------------------------------------------------------
-    # 9. Delete Execution Environments
-    # -----------------------------------------------------------------
     - name: "Delete Execution Environments"
       ansible.controller.execution_environment:
         name: "{{ item.name }}"
@@ -291,9 +233,6 @@
       register: _del_ees
       ignore_errors: true
 
-    # -----------------------------------------------------------------
-    # 10. Delete Organizations
-    # -----------------------------------------------------------------
     - name: "Delete Organizations"
       ansible.controller.organization:
         name: "{{ item.name }}"
@@ -307,9 +246,6 @@
       register: _del_organizations
       ignore_errors: true
 
-    # -----------------------------------------------------------------
-    # Cleanup local EE image (optional)
-    # -----------------------------------------------------------------
     - name: "Remove local EE image"
       ansible.builtin.command:
         cmd: "podman rmi smoke-test-ee:latest"
@@ -317,9 +253,6 @@
       changed_when: _del_local_ee.rc == 0
       failed_when: false
 
-    # -----------------------------------------------------------------
-    # Delete OAuth token
-    # -----------------------------------------------------------------
     - name: "Delete OAuth token"
       ansible.builtin.uri:
         url: "https://{{ aap_hostname }}{{ controller_oauthtoken_url }}"
@@ -331,9 +264,6 @@
         status_code: 204
       when: controller_oauthtoken_url is defined
 
-    # -----------------------------------------------------------------
-    # Report generation
-    # -----------------------------------------------------------------
     - name: "Ensure reports directory exists"
       ansible.builtin.file:
         path: "{{ reports_dir }}"

@@ -1,10 +1,3 @@
-# =============================================================================
-# Minimal Execution Environment Definition for ansible-builder
-# Used by Build Custom Execution Environment test
-#
-# This is a minimal EE for smoke testing purposes.
-# Base image: UBI9 (publicly available, no auth required)
-# =============================================================================
 ---
 version: 3
 

@@ -1,20 +1,3 @@
-# =============================================================================
-# Create a Job Template
-# =============================================================================
-# Objective: Verify the Job Template creation with Extra Variables.
-#
-# Role: infra.aap_configuration.controller_job_templates
-# Variables: controller_templates / controller_job_templates
-#
-# Prerequisites:
-#   - Required Credentials created
-#   - Project synchronized
-#   - Inventory created
-#   - Execution Environment registered
-#
-# Expected output: The Template is saved and its Details tab shows the
-#                  correct configuration.
-# =============================================================================
 ---
 - name: "Create Job Template"
   hosts: localhost
@@ -26,9 +9,6 @@
     reports_dir: "{{ playbook_dir }}/../reports/{{ ansible_date_time.date }}"
 
   tasks:
-    # -----------------------------------------------------------------
-    # Obtain OAuth token (standalone mode only)
-    # -----------------------------------------------------------------
     - name: "Obtain OAuth token (standalone mode)"
       ansible.builtin.uri:
         url: "https://{{ aap_hostname }}/api/controller/v2/tokens/"
@@ -48,9 +28,6 @@
       when: _authtoken_res is not skipped
       no_log: true
 
-    # -----------------------------------------------------------------
-    # Load template data (standalone mode)
-    # -----------------------------------------------------------------
     - name: "Find job template files (standalone mode)"
       ansible.builtin.find:
         paths: "{{ playbook_dir }}/../templates/job_templates/"
@@ -72,11 +49,6 @@
       ansible.builtin.set_fact:
         _templates: "{{ smoke_job_templates | default([]) }}"
 
-    # -----------------------------------------------------------------
-    # Create Job Template via infra.aap_configuration role
-    # The controller_job_templates role accepts both controller_templates
-    # and controller_job_templates as variable names
-    # -----------------------------------------------------------------
     - name: "Create Job Templates"
       ansible.builtin.include_role:
         name: infra.aap_configuration.controller_job_templates
@@ -84,9 +56,6 @@
         controller_templates: "{{ _templates }}"
         aap_token: "{{ controller_oauthtoken }}"
 
-    # -----------------------------------------------------------------
-    # Verify creation
-    # -----------------------------------------------------------------
     - name: "Verify Job Template creation"
       ansible.builtin.uri:
         url: "https://{{ controller_hostname }}/api/controller/v2/job_templates/?search={{ item.name | urlencode }}"
@@ -102,9 +71,6 @@
         label: "{{ item.name }}"
       register: jt_verify
 
-    # -----------------------------------------------------------------
-    # Report generation
-    # -----------------------------------------------------------------
     - name: "Set report status"
       ansible.builtin.set_fact:
         _overall_status: "{{ 'PASSED' if jt_verify.results | rejectattr('failed', 'false') | list | length == 0 else 'FAILED' }}"

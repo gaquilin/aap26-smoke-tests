@@ -1,17 +1,3 @@
-# =============================================================================
-# Platform Availability and Login
-# =============================================================================
-# Objective: Verify connectivity to the Gateway URL and that each AAP 2.6
-#            component endpoint responds correctly.
-#
-# Endpoints verified:
-#   - Gateway:                /api/gateway/v1/ping/
-#   - Controller:             /api/controller/v2/ping/
-#   - Private Automation Hub: /api/galaxy/pulp/api/v3/status/
-#   - EDA:                    /api/eda/v1/status/
-#
-# Expected output: Each endpoint returns HTTP 200.
-# =============================================================================
 ---
 - name: "Platform Availability and Login"
   hosts: localhost
@@ -32,9 +18,6 @@
         path: "/api/eda/v1/status/"
 
   tasks:
-    # -----------------------------------------------------------------
-    # Verify connectivity to each endpoint
-    # -----------------------------------------------------------------
     - name: "Ping AAP endpoints"
       ansible.builtin.uri:
         url: "https://{{ aap_hostname }}{{ item.path }}"
@@ -49,9 +32,6 @@
       register: ping_results
       ignore_errors: true
 
-    # -----------------------------------------------------------------
-    # Verify Gateway authentication
-    # -----------------------------------------------------------------
     - name: "Verify Gateway authentication"
       ansible.builtin.uri:
         url: "https://{{ aap_hostname }}/api/gateway/v1/me/"
@@ -65,9 +45,6 @@
       register: auth_result
       ignore_errors: true
 
-    # -----------------------------------------------------------------
-    # Verify Controller Instances
-    # -----------------------------------------------------------------
     - name: "Verify Controller Instances"
       ansible.builtin.uri:
         url: "https://{{ aap_hostname }}/api/controller/v2/instances/"
@@ -81,9 +58,6 @@
       register: instances_result
       ignore_errors: true
 
-    # -----------------------------------------------------------------
-    # Report generation
-    # -----------------------------------------------------------------
     - name: "Build report data"
       ansible.builtin.set_fact:
         _overall_status: >-

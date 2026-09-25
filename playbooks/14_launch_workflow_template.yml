@@ -1,14 +1,3 @@
-# =============================================================================
-# Launch and Verify the Workflow Job Template
-# =============================================================================
-# Objective: Verify that the Workflow Job Template runs successfully.
-#
-# Prerequisites:
-#   - Create Workflow Template test passed
-#
-# Expected output: The Workflow Job status is Successful and the inner
-#                  Job Template node completes successfully.
-# =============================================================================
 ---
 - name: "Launch and Verify Workflow Job Template"
   hosts: localhost
@@ -23,9 +12,6 @@
     workflow_wait_interval: 10
 
   tasks:
-    # -----------------------------------------------------------------
-    # Retrieve the Workflow Job Template
-    # -----------------------------------------------------------------
     - name: "Get Workflow Job Template details"
       ansible.builtin.uri:
         url: "https://{{ controller_hostname }}/api/controller/v2/workflow_job_templates/?search={{ workflow_template_name | urlencode }}"
@@ -49,9 +35,6 @@
         _wf_id: "{{ wf_lookup.json.results[0].id }}"
         _wf_name: "{{ wf_lookup.json.results[0].name }}"
 
-    # -----------------------------------------------------------------
-    # Launch the Workflow Job Template
-    # -----------------------------------------------------------------
     - name: "Launch Workflow Job Template"
       ansible.builtin.uri:
         url: "https://{{ controller_hostname }}/api/controller/v2/workflow_job_templates/{{ _wf_id }}/launch/"
@@ -75,9 +58,6 @@
       ansible.builtin.debug:
         msg: "Workflow Job {{ _wf_job_id }} launched for '{{ _wf_name }}'"
 
-    # -----------------------------------------------------------------
-    # Wait for Workflow Job completion
-    # -----------------------------------------------------------------
     - name: "Wait for Workflow Job to complete"
       ansible.builtin.uri:
         url: "https://{{ controller_hostname }}{{ _wf_job_url }}"
@@ -93,9 +73,6 @@
       retries: "{{ (workflow_wait_timeout / workflow_wait_interval) | int }}"
       delay: "{{ workflow_wait_interval }}"
 
-    # -----------------------------------------------------------------
-    # Get Workflow nodes results
-    # -----------------------------------------------------------------
     - name: "Get Workflow Job nodes"
       ansible.builtin.uri:
         url: "https://{{ controller_hostname }}/api/controller/v2/workflow_jobs/{{ _wf_job_id }}/workflow_nodes/"
@@ -108,9 +85,6 @@
         return_content: true
       register: wf_nodes
 
-    # -----------------------------------------------------------------
-    # Report generation
-    # -----------------------------------------------------------------
     - name: "Set report status"
       ansible.builtin.set_fact:
         _overall_status: "{{ 'PASSED' if wf_status.json.status == 'successful' else 'FAILED' }}"

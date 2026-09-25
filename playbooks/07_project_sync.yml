@@ -1,17 +1,3 @@
-# =============================================================================
-# Project Synchronization
-# =============================================================================
-# Objective: Verify SCM access and project update.
-#
-# Role: infra.aap_configuration.controller_projects
-# Variable: controller_projects
-#
-# Prerequisites:
-#   - Create Credentials test passed
-#
-# Expected output: The project status is Successful and the playbooks are
-#                  listed in the Job Template creation form.
-# =============================================================================
 ---
 - name: "Project Synchronization"
   hosts: localhost
@@ -23,9 +9,6 @@
     reports_dir: "{{ playbook_dir }}/../reports/{{ ansible_date_time.date }}"
 
   tasks:
-    # -----------------------------------------------------------------
-    # Obtain OAuth token (standalone mode only)
-    # -----------------------------------------------------------------
     - name: "Obtain OAuth token (standalone mode)"
       ansible.builtin.uri:
         url: "https://{{ aap_hostname }}/api/controller/v2/tokens/"
@@ -45,9 +28,6 @@
       when: _authtoken_res is not skipped
       no_log: true
 
-    # -----------------------------------------------------------------
-    # Load template data (standalone mode)
-    # -----------------------------------------------------------------
     - name: "Find project templates (standalone mode)"
       ansible.builtin.find:
         paths: "{{ playbook_dir }}/../templates/projects/"
@@ -69,10 +49,6 @@
       ansible.builtin.set_fact:
         _projects: "{{ smoke_projects | default([]) }}"
 
-    # -----------------------------------------------------------------
-    # Create and sync Project via infra.aap_configuration role
-    # (wait: true in the template waits for sync completion)
-    # -----------------------------------------------------------------
     - name: "Create and Sync Projects"
       ansible.builtin.include_role:
         name: infra.aap_configuration.controller_projects
@@ -80,9 +56,6 @@
         controller_projects: "{{ _projects }}"
         aap_token: "{{ controller_oauthtoken }}"
 
-    # -----------------------------------------------------------------
-    # Verify project sync status
-    # -----------------------------------------------------------------
     - name: "Verify Project sync status"
       ansible.builtin.uri:
         url: "https://{{ controller_hostname }}/api/controller/v2/projects/?search={{ item.name | urlencode }}"
@@ -114,9 +87,6 @@
       register: playbooks_check
       when: item.json.count | int > 0
 
-    # -----------------------------------------------------------------
-    # Report generation
-    # -----------------------------------------------------------------
     - name: "Set report status"
       ansible.builtin.set_fact:
         _overall_status: >-

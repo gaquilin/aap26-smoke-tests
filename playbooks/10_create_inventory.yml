@@ -1,27 +1,3 @@
-# =============================================================================
-# Create an Inventory with an Inventory Source
-# =============================================================================
-# Objective: Verify the Inventory and its Inventory Source creation.
-#            Additionally, verify that target hosts can be defined and reached.
-#
-# Roles:
-#   - infra.aap_configuration.controller_inventories
-#   - infra.aap_configuration.controller_inventory_sources
-#   - infra.aap_configuration.controller_hosts
-# Variables:
-#   - controller_inventories
-#   - controller_inventory_sources
-#   - controller_hosts
-#
-# Prerequisites:
-#   - Create Credential Type test passed
-#   - Create Credentials test passed
-#   - Credential required to access remote hosts, created
-#
-# Expected output: Inventory and Inventory Source created successfully.
-#                  The inventory source sync ends successfully, hosts are
-#                  correctly listed, and the Ad Hoc command ends successfully.
-# =============================================================================
 ---
 - name: "Create Inventory with Inventory Source"
   hosts: localhost
@@ -33,9 +9,6 @@
     reports_dir: "{{ playbook_dir }}/../reports/{{ ansible_date_time.date }}"
 
   tasks:
-    # -----------------------------------------------------------------
-    # Obtain OAuth token (standalone mode only)
-    # -----------------------------------------------------------------
     - name: "Obtain OAuth token (standalone mode)"
       ansible.builtin.uri:
         url: "https://{{ aap_hostname }}/api/controller/v2/tokens/"
@@ -55,9 +28,6 @@
       when: _authtoken_res is not skipped
       no_log: true
 
-    # -----------------------------------------------------------------
-    # Load template data (standalone mode)
-    # -----------------------------------------------------------------
     - name: "Find inventory templates (standalone mode)"
       ansible.builtin.find:
         paths: "{{ playbook_dir }}/../templates/inventories/"
@@ -87,9 +57,6 @@
         _inventory_sources: "{{ smoke_inventory_sources | default([]) }}"
         _hosts: "{{ smoke_hosts | default([]) }}"
 
-    # -----------------------------------------------------------------
-    # Phase 1: Create Inventory
-    # -----------------------------------------------------------------
     - name: "Create Inventories"
       ansible.builtin.include_role:
         name: infra.aap_configuration.controller_inventories
@@ -97,9 +64,6 @@
         controller_inventories: "{{ _inventories }}"
         aap_token: "{{ controller_oauthtoken }}"
 
-    # -----------------------------------------------------------------
-    # Phase 2: Create Hosts (for static tests)
-    # -----------------------------------------------------------------
     - name: "Create Hosts in Inventory"
       ansible.builtin.include_role:
         name: infra.aap_configuration.controller_hosts
@@ -108,9 +72,6 @@
         aap_token: "{{ controller_oauthtoken }}"
       when: _hosts | length > 0
 
-    # -----------------------------------------------------------------
-    # Phase 3: Create and Sync Inventory Source
-    # -----------------------------------------------------------------
     - name: "Create Inventory Sources"
       ansible.builtin.include_role:
         name: infra.aap_configuration.controller_inventory_sources
@@ -119,9 +80,6 @@
         aap_token: "{{ controller_oauthtoken }}"
       when: _inventory_sources | length > 0
 
-    # -----------------------------------------------------------------
-    # Verify Inventory creation
-    # -----------------------------------------------------------------
     - name: "Verify Inventory creation"
       ansible.builtin.uri:
         url: "https://{{ controller_hostname }}/api/controller/v2/inventories/?search={{ item.name | urlencode }}"
@@ -137,9 +95,6 @@
         label: "{{ item.name }}"
       register: inv_verify
 
-    # -----------------------------------------------------------------
-    # Verify hosts in inventory
-    # -----------------------------------------------------------------
     - name: "Get Inventory ID"
       ansible.builtin.set_fact:
         _inventory_id: "{{ inv_verify.results[0].json.results[0].id }}"
@@ -158,9 +113,6 @@
       register: hosts_verify
       when: _inventory_id is defined
 
-    # -----------------------------------------------------------------
-    # Ad Hoc Command test (ping) via API
-    # -----------------------------------------------------------------
     - name: "Look up a Machine credential for Ad Hoc command"
       ansible.builtin.uri:
         url: "https://{{ controller_hostname }}/api/controller/v2/credentials/?credential_type__name=Machine&page_size=1"
@@ -215,9 +167,6 @@
       when: adhoc_result is success and adhoc_result.json is defined
       ignore_errors: true
 
-    # -----------------------------------------------------------------
-    # Report generation
-    # -----------------------------------------------------------------
     - name: "Set report status"
       ansible.builtin.set_fact:
         _overall_status: "{{ 'PASSED' if inv_verify.results | rejectattr('failed', 'false') | list | length == 0 else 'FAILED' }}"
