@@ -1,0 +1,12 @@
+# =============================================================================
+# Template: Organization for AAP 2.6 Smoke Test
+# Role: infra.aap_configuration.controller_organizations
+# Expected variable: controller_organizations
+# =============================================================================
+---
+controller_organizations:
+  - name: "Smoke_Test_Organization"
+    description: "Organization created by AAP 2.6 Smoke Regression Test"
+    galaxy_credentials:
+      - "Automation Hub RH Certified Repository"
+      - "Automation Hub Published Repository"

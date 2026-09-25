@@ -1,0 +1,137 @@
+# =============================================================================
+# Build a Custom Execution Environment
+# =============================================================================
+# Objective: Verify that a custom EE can be built with ansible-builder
+#            on a RHEL host with Podman.
+#
+# Prerequisites:
+#   - RHEL host with an active subscription
+#   - Podman installed
+#   - Access to registry.redhat.io (pull only, for base images)
+#   - ansible-builder installed
+#
+# Expected output: The EE image builds successfully and is listed
+#                  locally in podman images.
+# =============================================================================
+---
+- name: "Build a Custom Execution Environment"
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  vars_files:
+    - ../credentials/credentials.yml
+  vars:
+    reports_dir: "{{ playbook_dir }}/../reports/{{ ansible_date_time.date }}"
+    ee_build_dir: "/tmp/smoke-test-ee-build"
+    ee_definition_src: "{{ playbook_dir }}/../templates/ee_definition"
+    ee_image_name: "smoke-test-ee"
+    ee_image_tag: "latest"
+
+  tasks:
+    # -----------------------------------------------------------------
+    # Prerequisites check
+    # -----------------------------------------------------------------
+    - name: "Check podman is installed"
+      ansible.builtin.command: podman --version
+      register: podman_check
+      changed_when: false
+      failed_when: podman_check.rc != 0
+
+    - name: "Check ansible-builder is installed"
+      ansible.builtin.command: ansible-builder --version
+      register: builder_check
+      changed_when: false
+      failed_when: builder_check.rc != 0
+
+    # -----------------------------------------------------------------
+    # Prepare build environment
+    # -----------------------------------------------------------------
+    - name: "Create EE build directory"
+      ansible.builtin.file:
+        path: "{{ ee_build_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: "Copy EE definition files"
+      ansible.builtin.copy:
+        src: "{{ ee_definition_src }}/"
+        dest: "{{ ee_build_dir }}/"
+        mode: '0644'
+
+    # -----------------------------------------------------------------
+    # Build the Execution Environment (local only, no push)
+    # Base image: UBI9 from registry.access.redhat.com (no auth required)
+    # -----------------------------------------------------------------
+    - name: "Build Execution Environment with ansible-builder"
+      ansible.builtin.command:
+        cmd: >-
+          ansible-builder build
+          -f {{ ee_build_dir }}/execution-environment.yml
+          -t {{ ee_image_name }}:{{ ee_image_tag }}
+          --container-runtime podman
+          --no-cache
+          -v 3
+        chdir: "{{ ee_build_dir }}"
+      register: ee_build_result
+      timeout: 600
+
+    # -----------------------------------------------------------------
+    # Verify built image exists locally
+    # -----------------------------------------------------------------
+    - name: "Verify EE image exists locally"
+      ansible.builtin.command:
+        cmd: "podman images {{ ee_image_name }}:{{ ee_image_tag }} --format '{{ '{{' }}.Repository{{ '}}' }}:{{ '{{' }}.Tag{{ '}}' }} {{ '{{' }}.Size{{ '}}' }}'"
+      register: image_verify
+      changed_when: false
+      failed_when: ee_image_name not in image_verify.stdout
+
+    # -----------------------------------------------------------------
+    # Report generation
+    # -----------------------------------------------------------------
+    - name: "Set report status"
+      ansible.builtin.set_fact:
+        _overall_status: "{{ 'PASSED' if (ee_build_result is success) and (image_verify is success) else 'FAILED' }}"
+        _status_icon: "{{ '✅' if (ee_build_result is success) and (image_verify is success) else '❌' }}"
+
+    - name: "Save report"
+      ansible.builtin.copy:
+        content: |
+          # Build a Custom Execution Environment
+
+          **Date:** {{ ansible_date_time.iso8601 }}
+          **Result:** {{ _status_icon }} {{ _overall_status }}
+
+          ## Resources Created
+
+          ### Execution Environment: {{ ee_image_name }}:{{ ee_image_tag }}
+
+          | Field | Value |
+          |---|---|
+          | **Resource Type** | Container Image (EE) - Local |
+          | **Image Name** | {{ ee_image_name }}:{{ ee_image_tag }} |
+          | **Build Status** | {{ 'SUCCESS' if ee_build_result is success else 'FAILED' }} |
+          | **Image Info** | {{ image_verify.stdout | trim }} |
+          | **Pushed to Public Registry** | No (local only) |
+
+          ## Prerequisites
+
+          | Tool | Version |
+          |---|---|
+          | Podman | {{ podman_check.stdout | trim }} |
+          | ansible-builder | {{ builder_check.stdout_lines[0] | default('unknown') }} |
+        dest: "{{ reports_dir }}/02_build_custom_ee_report.md"
+        mode: '0644'
+
+    - name: "Display test result"
+      ansible.builtin.debug:
+        msg: "Build Custom EE: {{ _overall_status }} | Image: {{ ee_image_name }}:{{ ee_image_tag }}"
+
+    # -----------------------------------------------------------------
+    # Cleanup (optional)
+    # -----------------------------------------------------------------
+    - name: "Cleanup build directory"
+      ansible.builtin.file:
+        path: "{{ ee_build_dir }}"
+        state: absent
+      when: false
+      tags: [cleanup]

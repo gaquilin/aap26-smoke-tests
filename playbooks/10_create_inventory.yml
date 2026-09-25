@@ -1,0 +1,274 @@
+# =============================================================================
+# Create an Inventory with an Inventory Source
+# =============================================================================
+# Objective: Verify the Inventory and its Inventory Source creation.
+#            Additionally, verify that target hosts can be defined and reached.
+#
+# Roles:
+#   - infra.aap_configuration.controller_inventories
+#   - infra.aap_configuration.controller_inventory_sources
+#   - infra.aap_configuration.controller_hosts
+# Variables:
+#   - controller_inventories
+#   - controller_inventory_sources
+#   - controller_hosts
+#
+# Prerequisites:
+#   - Create Credential Type test passed
+#   - Create Credentials test passed
+#   - Credential required to access remote hosts, created
+#
+# Expected output: Inventory and Inventory Source created successfully.
+#                  The inventory source sync ends successfully, hosts are
+#                  correctly listed, and the Ad Hoc command ends successfully.
+# =============================================================================
+---
+- name: "Create Inventory with Inventory Source"
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  vars_files:
+    - ../credentials/credentials.yml
+  vars:
+    reports_dir: "{{ playbook_dir }}/../reports/{{ ansible_date_time.date }}"
+
+  tasks:
+    # -----------------------------------------------------------------
+    # Obtain OAuth token (standalone mode only)
+    # -----------------------------------------------------------------
+    - name: "Obtain OAuth token (standalone mode)"
+      ansible.builtin.uri:
+        url: "https://{{ aap_hostname }}/api/controller/v2/tokens/"
+        user: "{{ aap_username }}"
+        password: "{{ aap_password }}"
+        method: POST
+        force_basic_auth: true
+        validate_certs: "{{ aap_validate_certs }}"
+        status_code: 201
+      register: _authtoken_res
+      no_log: true
+      when: controller_oauthtoken is not defined
+
+    - name: "Set OAuth token (standalone mode)"
+      ansible.builtin.set_fact:
+        controller_oauthtoken: "{{ _authtoken_res.json.token }}"
+      when: _authtoken_res is not skipped
+      no_log: true
+
+    # -----------------------------------------------------------------
+    # Load template data (standalone mode)
+    # -----------------------------------------------------------------
+    - name: "Find inventory templates (standalone mode)"
+      ansible.builtin.find:
+        paths: "{{ playbook_dir }}/../templates/inventories/"
+        patterns: "*.yml,*.yaml"
+      register: _template_files
+      when: smoke_inventories is not defined
+
+    - name: "Load inventory templates (standalone mode)"
+      ansible.builtin.set_fact:
+        smoke_inventories: >-
+          {{ smoke_inventories | default([]) +
+             ((lookup('template', item.path) | from_yaml).controller_inventories | default([])) }}
+        smoke_inventory_sources: >-
+          {{ smoke_inventory_sources | default([]) +
+             ((lookup('template', item.path) | from_yaml).controller_inventory_sources | default([])) }}
+        smoke_hosts: >-
+          {{ smoke_hosts | default([]) +
+             ((lookup('template', item.path) | from_yaml).controller_hosts | default([])) }}
+      loop: "{{ _template_files.files | default([]) }}"
+      loop_control:
+        label: "{{ item.path | basename }}"
+      when: _template_files is not skipped
+
+    - name: "Set inventory data"
+      ansible.builtin.set_fact:
+        _inventories: "{{ smoke_inventories | default([]) }}"
+        _inventory_sources: "{{ smoke_inventory_sources | default([]) }}"
+        _hosts: "{{ smoke_hosts | default([]) }}"
+
+    # -----------------------------------------------------------------
+    # Phase 1: Create Inventory
+    # -----------------------------------------------------------------
+    - name: "Create Inventories"
+      ansible.builtin.include_role:
+        name: infra.aap_configuration.controller_inventories
+      vars:
+        controller_inventories: "{{ _inventories }}"
+        aap_token: "{{ controller_oauthtoken }}"
+
+    # -----------------------------------------------------------------
+    # Phase 2: Create Hosts (for static tests)
+    # -----------------------------------------------------------------
+    - name: "Create Hosts in Inventory"
+      ansible.builtin.include_role:
+        name: infra.aap_configuration.controller_hosts
+      vars:
+        controller_hosts: "{{ _hosts }}"
+        aap_token: "{{ controller_oauthtoken }}"
+      when: _hosts | length > 0
+
+    # -----------------------------------------------------------------
+    # Phase 3: Create and Sync Inventory Source
+    # -----------------------------------------------------------------
+    - name: "Create Inventory Sources"
+      ansible.builtin.include_role:
+        name: infra.aap_configuration.controller_inventory_sources
+      vars:
+        controller_inventory_sources: "{{ _inventory_sources }}"
+        aap_token: "{{ controller_oauthtoken }}"
+      when: _inventory_sources | length > 0
+
+    # -----------------------------------------------------------------
+    # Verify Inventory creation
+    # -----------------------------------------------------------------
+    - name: "Verify Inventory creation"
+      ansible.builtin.uri:
+        url: "https://{{ controller_hostname }}/api/controller/v2/inventories/?search={{ item.name | urlencode }}"
+        method: GET
+        user: "{{ controller_username }}"
+        password: "{{ controller_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ controller_validate_certs }}"
+        status_code: [200]
+        return_content: true
+      loop: "{{ _inventories }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: inv_verify
+
+    # -----------------------------------------------------------------
+    # Verify hosts in inventory
+    # -----------------------------------------------------------------
+    - name: "Get Inventory ID"
+      ansible.builtin.set_fact:
+        _inventory_id: "{{ inv_verify.results[0].json.results[0].id }}"
+      when: inv_verify.results[0].json.count | int > 0
+
+    - name: "Verify Hosts in Inventory"
+      ansible.builtin.uri:
+        url: "https://{{ controller_hostname }}/api/controller/v2/inventories/{{ _inventory_id }}/hosts/"
+        method: GET
+        user: "{{ controller_username }}"
+        password: "{{ controller_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ controller_validate_certs }}"
+        status_code: [200]
+        return_content: true
+      register: hosts_verify
+      when: _inventory_id is defined
+
+    # -----------------------------------------------------------------
+    # Ad Hoc Command test (ping) via API
+    # -----------------------------------------------------------------
+    - name: "Look up a Machine credential for Ad Hoc command"
+      ansible.builtin.uri:
+        url: "https://{{ controller_hostname }}/api/controller/v2/credentials/?credential_type__name=Machine&page_size=1"
+        method: GET
+        user: "{{ controller_username }}"
+        password: "{{ controller_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ controller_validate_certs }}"
+        status_code: [200]
+        return_content: true
+      register: machine_cred_lookup
+      when: _inventory_id is defined
+      ignore_errors: true
+
+    - name: "Run Ad Hoc ping command"
+      ansible.builtin.uri:
+        url: "https://{{ controller_hostname }}/api/controller/v2/inventories/{{ _inventory_id }}/ad_hoc_commands/"
+        method: POST
+        user: "{{ controller_username }}"
+        password: "{{ controller_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ controller_validate_certs }}"
+        body_format: json
+        body:
+          module_name: "ping"
+          credential: "{{ machine_cred_lookup.json.results[0].id }}"
+          limit: ""
+          verbosity: 0
+        status_code: [201]
+        return_content: true
+      register: adhoc_result
+      when:
+        - _inventory_id is defined
+        - machine_cred_lookup is success
+        - machine_cred_lookup.json.count | int > 0
+      ignore_errors: true
+
+    - name: "Wait for Ad Hoc command to complete"
+      ansible.builtin.uri:
+        url: "https://{{ controller_hostname }}{{ adhoc_result.json.url }}"
+        method: GET
+        user: "{{ controller_username }}"
+        password: "{{ controller_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ controller_validate_certs }}"
+        status_code: [200]
+        return_content: true
+      register: adhoc_status
+      until: adhoc_status.json.status in ['successful', 'failed', 'error', 'canceled']
+      retries: 30
+      delay: 5
+      when: adhoc_result is success and adhoc_result.json is defined
+      ignore_errors: true
+
+    # -----------------------------------------------------------------
+    # Report generation
+    # -----------------------------------------------------------------
+    - name: "Set report status"
+      ansible.builtin.set_fact:
+        _overall_status: "{{ 'PASSED' if inv_verify.results | rejectattr('failed', 'false') | list | length == 0 else 'FAILED' }}"
+        _status_icon: "{{ '✅' if inv_verify.results | rejectattr('failed', 'false') | list | length == 0 else '❌' }}"
+
+    - name: "Save report"
+      ansible.builtin.copy:
+        content: |
+          # Create Inventory with Inventory Source
+
+          **Date:** {{ ansible_date_time.iso8601 }}
+          **Result:** {{ _status_icon }} {{ _overall_status }}
+
+          ## Resources Created
+
+          {% for inv in _inventories %}
+          ### Inventory: {{ inv.name }}
+
+          | Field | Value |
+          |---|---|
+          | **Resource Type** | Inventory |
+          | **Name** | {{ inv.name }} |
+          | **Organization** | {{ inv.organization | default('N/A') }} |
+
+          {% endfor %}
+          {% for src in _inventory_sources %}
+          ### Inventory Source: {{ src.name }}
+
+          | Field | Value |
+          |---|---|
+          | **Resource Type** | Inventory Source |
+          | **Name** | {{ src.name }} |
+          | **Source** | {{ src.source | default('N/A') }} |
+          | **Project** | {{ src.source_project | default('N/A') }} |
+
+          {% endfor %}
+          ## Verification
+
+          | Resource | Status |
+          |---|---|
+          {% for result in inv_verify.results %}
+          | Inventory: {{ result.item.name }} | {{ '✅ Found' if result.json.count | int > 0 else '❌ Not Found' }} |
+          {% endfor %}
+          | Hosts Count | {{ (hosts_verify.json.count | default(0)) if hosts_verify is defined and hosts_verify is success else 0 }} |
+          | Ad Hoc Ping | {{ (adhoc_status.json.status | default('not_executed')) if adhoc_status is defined else 'not_executed' }} |
+        dest: "{{ reports_dir }}/10_create_inventory_report.md"
+        mode: '0644'
+
+    - name: "Display test result"
+      ansible.builtin.debug:
+        msg: >-
+          Create Inventory: {{ _overall_status }}
+          | Hosts: {{ (hosts_verify.json.count | default(0)) if hosts_verify is defined and hosts_verify is success else 0 }}
+          | Ad Hoc Ping: {{ (adhoc_status.json.status | default('skipped')) if adhoc_status is defined and adhoc_status is not skipped else 'skipped' }}

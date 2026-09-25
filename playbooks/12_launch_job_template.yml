@@ -1,0 +1,179 @@
+# =============================================================================
+# Launch and Verify the Job Template
+# =============================================================================
+# Objective: Verify that the Job Template runs successfully.
+#
+# Prerequisites:
+#   - Create Job Template test passed
+#
+# Verification:
+#   - Launch the Job Template
+#   - Monitor execution in the Output Tab
+#   - Verify that Extra Variables are correctly applied
+#   - Check the Job status in Automation Execution > Jobs
+#
+# Expected output: The job status is Successful and the correct settings
+#                  are shown in the Job Details.
+# =============================================================================
+---
+- name: "Launch and Verify Job Template"
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  vars_files:
+    - ../credentials/credentials.yml
+  vars:
+    reports_dir: "{{ playbook_dir }}/../reports/{{ ansible_date_time.date }}"
+    job_template_name: "Smoke Test Job Template"
+    job_wait_timeout: 300
+    job_wait_interval: 10
+
+  tasks:
+    # -----------------------------------------------------------------
+    # Retrieve the Job Template
+    # -----------------------------------------------------------------
+    - name: "Get Job Template details"
+      ansible.builtin.uri:
+        url: "https://{{ controller_hostname }}/api/controller/v2/job_templates/?search={{ job_template_name | urlencode }}"
+        method: GET
+        user: "{{ controller_username }}"
+        password: "{{ controller_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ controller_validate_certs }}"
+        status_code: [200]
+        return_content: true
+      register: jt_lookup
+
+    - name: "Assert Job Template exists"
+      ansible.builtin.assert:
+        that:
+          - jt_lookup.json.count | int > 0
+        fail_msg: "Job Template '{{ job_template_name }}' not found. Run Create Job Template test first."
+
+    - name: "Set Job Template ID"
+      ansible.builtin.set_fact:
+        _jt_id: "{{ jt_lookup.json.results[0].id }}"
+        _jt_name: "{{ jt_lookup.json.results[0].name }}"
+
+    # -----------------------------------------------------------------
+    # Launch the Job Template
+    # -----------------------------------------------------------------
+    - name: "Launch Job Template"
+      ansible.builtin.uri:
+        url: "https://{{ controller_hostname }}/api/controller/v2/job_templates/{{ _jt_id }}/launch/"
+        method: POST
+        user: "{{ controller_username }}"
+        password: "{{ controller_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ controller_validate_certs }}"
+        body_format: json
+        body: {}
+        status_code: [201]
+        return_content: true
+      register: job_launch
+
+    - name: "Set Job ID"
+      ansible.builtin.set_fact:
+        _job_id: "{{ job_launch.json.id }}"
+        _job_url: "{{ job_launch.json.url }}"
+
+    - name: "Display job launch info"
+      ansible.builtin.debug:
+        msg: "Job {{ _job_id }} launched for template '{{ _jt_name }}'"
+
+    # -----------------------------------------------------------------
+    # Wait for Job completion
+    # -----------------------------------------------------------------
+    - name: "Wait for Job to complete"
+      ansible.builtin.uri:
+        url: "https://{{ controller_hostname }}{{ _job_url }}"
+        method: GET
+        user: "{{ controller_username }}"
+        password: "{{ controller_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ controller_validate_certs }}"
+        status_code: [200]
+        return_content: true
+      register: job_status
+      until: job_status.json.status in ['successful', 'failed', 'error', 'canceled']
+      retries: "{{ (job_wait_timeout / job_wait_interval) | int }}"
+      delay: "{{ job_wait_interval }}"
+
+    # -----------------------------------------------------------------
+    # Retrieve output and Extra Variables
+    # -----------------------------------------------------------------
+    - name: "Get Job stdout"
+      ansible.builtin.uri:
+        url: "https://{{ controller_hostname }}/api/controller/v2/jobs/{{ _job_id }}/stdout/?format=txt"
+        method: GET
+        user: "{{ controller_username }}"
+        password: "{{ controller_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ controller_validate_certs }}"
+        status_code: [200]
+        return_content: true
+      register: job_stdout
+      ignore_errors: true
+
+    - name: "Get Job details (Extra Variables)"
+      ansible.builtin.uri:
+        url: "https://{{ controller_hostname }}/api/controller/v2/jobs/{{ _job_id }}/"
+        method: GET
+        user: "{{ controller_username }}"
+        password: "{{ controller_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ controller_validate_certs }}"
+        status_code: [200]
+        return_content: true
+      register: job_details
+
+    # -----------------------------------------------------------------
+    # Report generation
+    # -----------------------------------------------------------------
+    - name: "Set report status"
+      ansible.builtin.set_fact:
+        _overall_status: "{{ 'PASSED' if job_status.json.status == 'successful' else 'FAILED' }}"
+        _status_icon: "{{ '✅' if job_status.json.status == 'successful' else '❌' }}"
+
+    - name: "Save report"
+      ansible.builtin.copy:
+        content: |
+          # Launch and Verify Job Template
+
+          **Date:** {{ ansible_date_time.iso8601 }}
+          **Result:** {{ _status_icon }} {{ _overall_status }}
+
+          ## Job Execution Details
+
+          | Field | Value |
+          |---|---|
+          | **Resource Type** | Job |
+          | **Job ID** | {{ _job_id }} |
+          | **Job Template** | {{ _jt_name }} |
+          | **Status** | {{ job_status.json.status }} |
+          | **Started** | {{ job_status.json.started | default('N/A') }} |
+          | **Finished** | {{ job_status.json.finished | default('N/A') }} |
+          | **Elapsed** | {{ job_status.json.elapsed | default('N/A') }}s |
+
+          ## Extra Variables Applied
+
+          ```yaml
+          {{ job_details.json.extra_vars | default('{}') }}
+          ```
+        dest: "{{ reports_dir }}/12_launch_job_template_report.md"
+        mode: '0644'
+
+    - name: "Display test result"
+      ansible.builtin.debug:
+        msg: >-
+          Launch Job Template: {{ _overall_status }}
+          | Job ID: {{ _job_id }}
+          | Status: {{ job_status.json.status }}
+          | Elapsed: {{ job_status.json.elapsed | default('N/A') }}s
+
+    - name: "Assert Job completed successfully"
+      ansible.builtin.assert:
+        that:
+          - job_status.json.status == 'successful'
+        fail_msg: "Job {{ _job_id }} ended with status '{{ job_status.json.status }}' instead of 'successful'"
+        success_msg: "Job {{ _job_id }} completed successfully"

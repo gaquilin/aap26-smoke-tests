@@ -1,0 +1,175 @@
+# =============================================================================
+# Project Synchronization
+# =============================================================================
+# Objective: Verify SCM access and project update.
+#
+# Role: infra.aap_configuration.controller_projects
+# Variable: controller_projects
+#
+# Prerequisites:
+#   - Create Credentials test passed
+#
+# Expected output: The project status is Successful and the playbooks are
+#                  listed in the Job Template creation form.
+# =============================================================================
+---
+- name: "Project Synchronization"
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  vars_files:
+    - ../credentials/credentials.yml
+  vars:
+    reports_dir: "{{ playbook_dir }}/../reports/{{ ansible_date_time.date }}"
+
+  tasks:
+    # -----------------------------------------------------------------
+    # Obtain OAuth token (standalone mode only)
+    # -----------------------------------------------------------------
+    - name: "Obtain OAuth token (standalone mode)"
+      ansible.builtin.uri:
+        url: "https://{{ aap_hostname }}/api/controller/v2/tokens/"
+        user: "{{ aap_username }}"
+        password: "{{ aap_password }}"
+        method: POST
+        force_basic_auth: true
+        validate_certs: "{{ aap_validate_certs }}"
+        status_code: 201
+      register: _authtoken_res
+      no_log: true
+      when: controller_oauthtoken is not defined
+
+    - name: "Set OAuth token (standalone mode)"
+      ansible.builtin.set_fact:
+        controller_oauthtoken: "{{ _authtoken_res.json.token }}"
+      when: _authtoken_res is not skipped
+      no_log: true
+
+    # -----------------------------------------------------------------
+    # Load template data (standalone mode)
+    # -----------------------------------------------------------------
+    - name: "Find project templates (standalone mode)"
+      ansible.builtin.find:
+        paths: "{{ playbook_dir }}/../templates/projects/"
+        patterns: "*.yml,*.yaml"
+      register: _template_files
+      when: smoke_projects is not defined
+
+    - name: "Load project templates (standalone mode)"
+      ansible.builtin.set_fact:
+        smoke_projects: >-
+          {{ smoke_projects | default([]) +
+             ((lookup('template', item.path) | from_yaml).controller_projects | default([])) }}
+      loop: "{{ _template_files.files | default([]) }}"
+      loop_control:
+        label: "{{ item.path | basename }}"
+      when: _template_files is not skipped
+
+    - name: "Set project data"
+      ansible.builtin.set_fact:
+        _projects: "{{ smoke_projects | default([]) }}"
+
+    # -----------------------------------------------------------------
+    # Create and sync Project via infra.aap_configuration role
+    # (wait: true in the template waits for sync completion)
+    # -----------------------------------------------------------------
+    - name: "Create and Sync Projects"
+      ansible.builtin.include_role:
+        name: infra.aap_configuration.controller_projects
+      vars:
+        controller_projects: "{{ _projects }}"
+        aap_token: "{{ controller_oauthtoken }}"
+
+    # -----------------------------------------------------------------
+    # Verify project sync status
+    # -----------------------------------------------------------------
+    - name: "Verify Project sync status"
+      ansible.builtin.uri:
+        url: "https://{{ controller_hostname }}/api/controller/v2/projects/?search={{ item.name | urlencode }}"
+        method: GET
+        user: "{{ controller_username }}"
+        password: "{{ controller_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ controller_validate_certs }}"
+        status_code: [200]
+        return_content: true
+      loop: "{{ _projects }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: project_verify
+
+    - name: "Check playbooks available in project"
+      ansible.builtin.uri:
+        url: "https://{{ controller_hostname }}/api/controller/v2/projects/{{ item.json.results[0].id }}/playbooks/"
+        method: GET
+        user: "{{ controller_username }}"
+        password: "{{ controller_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ controller_validate_certs }}"
+        status_code: [200]
+        return_content: true
+      loop: "{{ project_verify.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+      register: playbooks_check
+      when: item.json.count | int > 0
+
+    # -----------------------------------------------------------------
+    # Report generation
+    # -----------------------------------------------------------------
+    - name: "Set report status"
+      ansible.builtin.set_fact:
+        _overall_status: >-
+          {{ 'PASSED' if (project_verify.results | rejectattr('failed', 'false') | list | length == 0)
+             and (project_verify.results | map(attribute='json') | map(attribute='results') | flatten
+                  | selectattr('status', 'equalto', 'successful') | list | length > 0)
+             else 'FAILED' }}
+
+    - name: "Save report"
+      ansible.builtin.copy:
+        content: |
+          # Project Synchronization
+
+          **Date:** {{ ansible_date_time.iso8601 }}
+          **Result:** {{ '✅' if _overall_status == 'PASSED' else '❌' }} {{ _overall_status }}
+
+          ## Resources Created
+
+          {% for proj in _projects %}
+          ### Project: {{ proj.name }}
+
+          | Field | Value |
+          |---|---|
+          | **Resource Type** | Project |
+          | **Name** | {{ proj.name }} |
+          | **Organization** | {{ proj.organization | default('N/A') }} |
+          | **SCM Type** | {{ proj.scm_type | default('N/A') }} |
+          | **SCM URL** | {{ proj.scm_url | default('N/A') }} |
+          | **SCM Branch** | {{ proj.scm_branch | default('N/A') }} |
+          | **SCM Credential** | {{ proj.scm_credential | default('N/A') }} |
+
+          {% endfor %}
+          ## Verification
+
+          | Project | Sync Status |
+          |---|---|
+          {% for result in project_verify.results %}
+          | {{ result.item.name }} | {{ result.json.results[0].status | default('unknown') if result.json.count | int > 0 else 'NOT FOUND' }} |
+          {% endfor %}
+        dest: "{{ reports_dir }}/07_project_sync_report.md"
+        mode: '0644'
+
+    - name: "Display test result"
+      ansible.builtin.debug:
+        msg: "Project Sync: {{ _overall_status }}"
+
+    - name: "Assert Projects synced successfully"
+      ansible.builtin.assert:
+        that:
+          - item.json.results | length > 0
+          - item.json.results[0].status == 'successful'
+        fail_msg: "Project '{{ item.item.name }}' sync failed or not found"
+        success_msg: "Project '{{ item.item.name }}' synced successfully"
+      loop: "{{ project_verify.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"

@@ -1,0 +1,160 @@
+# =============================================================================
+# Create a Workflow Job Template
+# =============================================================================
+# Objective: Verify the Workflow Job Template creation with a single node
+#            composed of the previously created Job Template.
+#
+# Role: infra.aap_configuration.controller_workflow_job_templates
+# Variable: controller_workflows
+#
+# Prerequisites:
+#   - Organization already created
+#   - Job Template already created
+#
+# Expected output: The Workflow Template is saved and visible in the
+#                  AAP 2.6 UI.
+# =============================================================================
+---
+- name: "Create Workflow Job Template"
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  vars_files:
+    - ../credentials/credentials.yml
+  vars:
+    reports_dir: "{{ playbook_dir }}/../reports/{{ ansible_date_time.date }}"
+
+  tasks:
+    # -----------------------------------------------------------------
+    # Obtain OAuth token (standalone mode only)
+    # -----------------------------------------------------------------
+    - name: "Obtain OAuth token (standalone mode)"
+      ansible.builtin.uri:
+        url: "https://{{ aap_hostname }}/api/controller/v2/tokens/"
+        user: "{{ aap_username }}"
+        password: "{{ aap_password }}"
+        method: POST
+        force_basic_auth: true
+        validate_certs: "{{ aap_validate_certs }}"
+        status_code: 201
+      register: _authtoken_res
+      no_log: true
+      when: controller_oauthtoken is not defined
+
+    - name: "Set OAuth token (standalone mode)"
+      ansible.builtin.set_fact:
+        controller_oauthtoken: "{{ _authtoken_res.json.token }}"
+      when: _authtoken_res is not skipped
+      no_log: true
+
+    # -----------------------------------------------------------------
+    # Load template data (standalone mode)
+    # -----------------------------------------------------------------
+    - name: "Find workflow templates (standalone mode)"
+      ansible.builtin.find:
+        paths: "{{ playbook_dir }}/../templates/workflow_job_templates/"
+        patterns: "*.yml,*.yaml"
+      register: _template_files
+      when: smoke_workflows is not defined
+
+    - name: "Load workflow templates (standalone mode)"
+      ansible.builtin.set_fact:
+        smoke_workflows: >-
+          {{ smoke_workflows | default([]) +
+             ((lookup('template', item.path) | from_yaml).controller_workflows | default([])) }}
+      loop: "{{ _template_files.files | default([]) }}"
+      loop_control:
+        label: "{{ item.path | basename }}"
+      when: _template_files is not skipped
+
+    - name: "Set workflow data"
+      ansible.builtin.set_fact:
+        _workflows: "{{ smoke_workflows | default([]) }}"
+
+    - name: "Display workflows to create"
+      ansible.builtin.debug:
+        msg: "Creating {{ _workflows | length }} workflow(s): {{ _workflows | map(attribute='name') | list }}"
+
+    # -----------------------------------------------------------------
+    # Create Workflow Job Template via infra.aap_configuration role
+    # -----------------------------------------------------------------
+    - name: "Create Workflow Job Templates"
+      ansible.builtin.include_role:
+        name: infra.aap_configuration.controller_workflow_job_templates
+      vars:
+        controller_workflows: "{{ _workflows }}"
+        aap_token: "{{ controller_oauthtoken }}"
+
+    # -----------------------------------------------------------------
+    # Verify creation
+    # -----------------------------------------------------------------
+    - name: "Verify Workflow Job Template creation"
+      ansible.builtin.uri:
+        url: "https://{{ controller_hostname }}/api/controller/v2/workflow_job_templates/?search={{ item.name | urlencode }}"
+        method: GET
+        user: "{{ controller_username }}"
+        password: "{{ controller_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ controller_validate_certs }}"
+        status_code: [200]
+        return_content: true
+      loop: "{{ _workflows }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: wf_verify
+
+    # -----------------------------------------------------------------
+    # Report generation
+    # -----------------------------------------------------------------
+    - name: "Set report status"
+      ansible.builtin.set_fact:
+        _overall_status: "{{ 'PASSED' if wf_verify.results | rejectattr('failed', 'false') | list | length == 0 else 'FAILED' }}"
+        _status_icon: "{{ '✅' if wf_verify.results | rejectattr('failed', 'false') | list | length == 0 else '❌' }}"
+
+    - name: "Save report"
+      ansible.builtin.copy:
+        content: |
+          # Create Workflow Job Template
+
+          **Date:** {{ ansible_date_time.iso8601 }}
+          **Result:** {{ _status_icon }} {{ _overall_status }}
+
+          ## Resources Created
+
+          {% for wf in _workflows %}
+          ### Workflow: {{ wf.name }}
+
+          | Field | Value |
+          |---|---|
+          | **Resource Type** | Workflow Job Template |
+          | **Name** | {{ wf.name }} |
+          | **Organization** | {{ wf.organization | default('N/A') }} |
+          | **Nodes** | {{ wf.simplified_workflow_nodes | length }} |
+          {% for node in wf.simplified_workflow_nodes %}
+          | **Node: {{ node.identifier }}** | {{ node.unified_job_template }} |
+          {% endfor %}
+
+          {% endfor %}
+          ## Verification
+
+          | Workflow | Found on AAP |
+          |---|---|
+          {% for result in wf_verify.results %}
+          | {{ result.item.name }} | {{ '✅ Yes' if result.json.count | int > 0 else '❌ No' }} |
+          {% endfor %}
+        dest: "{{ reports_dir }}/13_create_workflow_template_report.md"
+        mode: '0644'
+
+    - name: "Display test result"
+      ansible.builtin.debug:
+        msg: "Create Workflow Template: {{ _overall_status }}"
+
+    - name: "Assert Workflow Templates created"
+      ansible.builtin.assert:
+        that:
+          - item.json.count | int > 0
+        fail_msg: "Workflow '{{ item.item.name }}' not found"
+        success_msg: "Workflow '{{ item.item.name }}' created successfully"
+      loop: "{{ wf_verify.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"

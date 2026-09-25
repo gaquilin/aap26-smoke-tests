@@ -1,0 +1,389 @@
+# =============================================================================
+# Cleanup - Remove All Smoke Test Resources from AAP 2.6
+# =============================================================================
+# Objective: Delete all resources created by the smoke test suite, proceeding
+#            from child resources to parent resources to respect dependencies.
+#
+# Deletion order (child first):
+#   1. Workflow Job Templates
+#   2. Job Templates
+#   3. Inventory Sources
+#   4. Hosts
+#   5. Inventories
+#   6. Projects
+#   7. Credentials
+#   8. Credential Types
+#   9. Execution Environments
+#  10. Organizations
+#
+# Run with:
+#   ansible-playbook playbooks/99_cleanup.yml
+# =============================================================================
+---
+- name: "Cleanup - Remove All Smoke Test Resources"
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  vars_files:
+    - ../credentials/credentials.yml
+  vars:
+    reports_dir: "{{ playbook_dir }}/../reports/{{ ansible_date_time.date }}"
+    templates_dir: "{{ playbook_dir }}/../templates"
+
+  tasks:
+    # -----------------------------------------------------------------
+    # Obtain OAuth token
+    # -----------------------------------------------------------------
+    - name: "Obtain OAuth token"
+      ansible.builtin.uri:
+        url: "https://{{ aap_hostname }}/api/controller/v2/tokens/"
+        user: "{{ aap_username }}"
+        password: "{{ aap_password }}"
+        method: POST
+        force_basic_auth: true
+        validate_certs: "{{ aap_validate_certs }}"
+        status_code: 201
+      register: _authtoken_res
+      no_log: true
+
+    - name: "Set OAuth token"
+      ansible.builtin.set_fact:
+        controller_oauthtoken: "{{ _authtoken_res.json.token }}"
+        controller_oauthtoken_url: "{{ _authtoken_res.json.url }}"
+      no_log: true
+
+    # -----------------------------------------------------------------
+    # Load all template data to know what to delete
+    # -----------------------------------------------------------------
+    - name: "Scan template files"
+      ansible.builtin.find:
+        paths: "{{ templates_dir }}"
+        patterns: "*.yml,*.yaml"
+        recurse: true
+      register: _template_files_raw
+
+    - name: "Filter out ee_definition files"
+      ansible.builtin.set_fact:
+        _template_files: "{{ _template_files_raw.files | rejectattr('path', 'search', 'ee_definition') | list }}"
+
+    - name: "Load all template data"
+      ansible.builtin.set_fact:
+        _all_data: >-
+          {{ _all_data | default([]) +
+             [{ 'path': item.path,
+                'content': lookup('template', item.path) | from_yaml }] }}
+      loop: "{{ _template_files }}"
+      loop_control:
+        label: "{{ item.path | basename }}"
+
+    - name: "Extract resource lists"
+      ansible.builtin.set_fact:
+        _workflows: >-
+          {{ _all_data | selectattr('path', 'search', 'workflow_job_templates')
+             | map(attribute='content.controller_workflows')
+             | select('defined') | reject('none') | flatten | list }}
+        _job_templates: >-
+          {{ _all_data | selectattr('path', 'search', 'job_templates')
+             | map(attribute='content.controller_templates')
+             | select('defined') | reject('none') | flatten | list }}
+        _inventories: >-
+          {{ _all_data | selectattr('path', 'search', 'inventories')
+             | map(attribute='content.controller_inventories')
+             | select('defined') | reject('none') | flatten | list }}
+        _inventory_sources: >-
+          {{ _all_data | selectattr('path', 'search', 'inventories')
+             | map(attribute='content.controller_inventory_sources')
+             | select('defined') | reject('none') | flatten | list }}
+        _hosts: >-
+          {{ _all_data | selectattr('path', 'search', 'inventories')
+             | map(attribute='content.controller_hosts')
+             | select('defined') | reject('none') | flatten | list }}
+        _projects: >-
+          {{ _all_data | selectattr('path', 'search', 'projects')
+             | map(attribute='content.controller_projects')
+             | select('defined') | reject('none') | flatten | list }}
+        _credentials: >-
+          {{ _all_data | selectattr('path', 'search', 'credentials/')
+             | map(attribute='content.controller_credentials')
+             | select('defined') | reject('none') | flatten | list }}
+        _credential_types: >-
+          {{ _all_data | selectattr('path', 'search', 'credential_types')
+             | map(attribute='content.controller_credential_types')
+             | select('defined') | reject('none') | flatten | list }}
+        _execution_environments: >-
+          {{ _all_data | selectattr('path', 'search', 'execution_environments')
+             | map(attribute='content.controller_execution_environments')
+             | select('defined') | reject('none') | flatten | list }}
+        _organizations: >-
+          {{ _all_data | selectattr('path', 'search', 'organizations')
+             | map(attribute='content.controller_organizations')
+             | select('defined') | reject('none') | flatten | list }}
+
+    - name: "Display resources to delete"
+      ansible.builtin.debug:
+        msg:
+          - "=== Cleanup - Resources to Delete ==="
+          - "Workflow Templates:     {{ _workflows | length }}"
+          - "Job Templates:          {{ _job_templates | length }}"
+          - "Inventory Sources:      {{ _inventory_sources | length }}"
+          - "Hosts:                  {{ _hosts | length }}"
+          - "Inventories:            {{ _inventories | length }}"
+          - "Projects:               {{ _projects | length }}"
+          - "Credentials:            {{ _credentials | length }}"
+          - "Credential Types:       {{ _credential_types | length }}"
+          - "Execution Environments: {{ _execution_environments | length }}"
+          - "Organizations:          {{ _organizations | length }}"
+
+    # =================================================================
+    # DELETION - Child to Parent order
+    # =================================================================
+
+    # -----------------------------------------------------------------
+    # 1. Delete Workflow Job Templates
+    # -----------------------------------------------------------------
+    - name: "Delete Workflow Job Templates"
+      ansible.controller.workflow_job_template:
+        name: "{{ item.name }}"
+        organization: "{{ item.organization | default(omit) }}"
+        state: absent
+        controller_host: "{{ aap_hostname }}"
+        controller_oauthtoken: "{{ controller_oauthtoken }}"
+        validate_certs: "{{ aap_validate_certs }}"
+      loop: "{{ _workflows }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: _del_workflows
+      ignore_errors: true
+
+    # -----------------------------------------------------------------
+    # 2. Delete Job Templates
+    # -----------------------------------------------------------------
+    - name: "Delete Job Templates"
+      ansible.controller.job_template:
+        name: "{{ item.name }}"
+        organization: "{{ item.organization | default(omit) }}"
+        state: absent
+        controller_host: "{{ aap_hostname }}"
+        controller_oauthtoken: "{{ controller_oauthtoken }}"
+        validate_certs: "{{ aap_validate_certs }}"
+      loop: "{{ _job_templates }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: _del_job_templates
+      ignore_errors: true
+
+    # -----------------------------------------------------------------
+    # 3. Delete Inventory Sources
+    # -----------------------------------------------------------------
+    - name: "Delete Inventory Sources"
+      ansible.controller.inventory_source:
+        name: "{{ item.name }}"
+        inventory: "{{ item.inventory }}"
+        state: absent
+        controller_host: "{{ aap_hostname }}"
+        controller_oauthtoken: "{{ controller_oauthtoken }}"
+        validate_certs: "{{ aap_validate_certs }}"
+      loop: "{{ _inventory_sources }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: _del_inv_sources
+      ignore_errors: true
+
+    # -----------------------------------------------------------------
+    # 4. Delete Hosts
+    # -----------------------------------------------------------------
+    - name: "Delete Hosts"
+      ansible.controller.host:
+        name: "{{ item.name }}"
+        inventory: "{{ item.inventory }}"
+        state: absent
+        controller_host: "{{ aap_hostname }}"
+        controller_oauthtoken: "{{ controller_oauthtoken }}"
+        validate_certs: "{{ aap_validate_certs }}"
+      loop: "{{ _hosts }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: _del_hosts
+      ignore_errors: true
+
+    # -----------------------------------------------------------------
+    # 5. Delete Inventories
+    # -----------------------------------------------------------------
+    - name: "Delete Inventories"
+      ansible.controller.inventory:
+        name: "{{ item.name }}"
+        organization: "{{ item.organization | default(omit) }}"
+        state: absent
+        controller_host: "{{ aap_hostname }}"
+        controller_oauthtoken: "{{ controller_oauthtoken }}"
+        validate_certs: "{{ aap_validate_certs }}"
+      loop: "{{ _inventories }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: _del_inventories
+      ignore_errors: true
+
+    # -----------------------------------------------------------------
+    # 6. Delete Projects
+    # -----------------------------------------------------------------
+    - name: "Delete Projects"
+      ansible.controller.project:
+        name: "{{ item.name }}"
+        organization: "{{ item.organization | default(omit) }}"
+        state: absent
+        controller_host: "{{ aap_hostname }}"
+        controller_oauthtoken: "{{ controller_oauthtoken }}"
+        validate_certs: "{{ aap_validate_certs }}"
+      loop: "{{ _projects }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: _del_projects
+      ignore_errors: true
+
+    # -----------------------------------------------------------------
+    # 7. Delete Credentials
+    # -----------------------------------------------------------------
+    - name: "Delete Credentials"
+      ansible.controller.credential:
+        name: "{{ item.name }}"
+        organization: "{{ item.organization | default(omit) }}"
+        credential_type: "{{ item.credential_type }}"
+        state: absent
+        controller_host: "{{ aap_hostname }}"
+        controller_oauthtoken: "{{ controller_oauthtoken }}"
+        validate_certs: "{{ aap_validate_certs }}"
+      loop: "{{ _credentials }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: _del_credentials
+      ignore_errors: true
+
+    # -----------------------------------------------------------------
+    # 8. Delete Credential Types
+    # -----------------------------------------------------------------
+    - name: "Delete Credential Types"
+      ansible.controller.credential_type:
+        name: "{{ item.name }}"
+        kind: "{{ item.kind }}"
+        state: absent
+        controller_host: "{{ aap_hostname }}"
+        controller_oauthtoken: "{{ controller_oauthtoken }}"
+        validate_certs: "{{ aap_validate_certs }}"
+      loop: "{{ _credential_types }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: _del_credential_types
+      ignore_errors: true
+
+    # -----------------------------------------------------------------
+    # 9. Delete Execution Environments
+    # -----------------------------------------------------------------
+    - name: "Delete Execution Environments"
+      ansible.controller.execution_environment:
+        name: "{{ item.name }}"
+        state: absent
+        controller_host: "{{ aap_hostname }}"
+        controller_oauthtoken: "{{ controller_oauthtoken }}"
+        validate_certs: "{{ aap_validate_certs }}"
+      loop: "{{ _execution_environments }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: _del_ees
+      ignore_errors: true
+
+    # -----------------------------------------------------------------
+    # 10. Delete Organizations
+    # -----------------------------------------------------------------
+    - name: "Delete Organizations"
+      ansible.controller.organization:
+        name: "{{ item.name }}"
+        state: absent
+        controller_host: "{{ aap_hostname }}"
+        controller_oauthtoken: "{{ controller_oauthtoken }}"
+        validate_certs: "{{ aap_validate_certs }}"
+      loop: "{{ _organizations }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: _del_organizations
+      ignore_errors: true
+
+    # -----------------------------------------------------------------
+    # Cleanup local EE image (optional)
+    # -----------------------------------------------------------------
+    - name: "Remove local EE image"
+      ansible.builtin.command:
+        cmd: "podman rmi smoke-test-ee:latest"
+      register: _del_local_ee
+      changed_when: _del_local_ee.rc == 0
+      failed_when: false
+
+    # -----------------------------------------------------------------
+    # Delete OAuth token
+    # -----------------------------------------------------------------
+    - name: "Delete OAuth token"
+      ansible.builtin.uri:
+        url: "https://{{ aap_hostname }}{{ controller_oauthtoken_url }}"
+        user: "{{ aap_username }}"
+        password: "{{ aap_password }}"
+        method: DELETE
+        force_basic_auth: true
+        validate_certs: "{{ aap_validate_certs }}"
+        status_code: 204
+      when: controller_oauthtoken_url is defined
+
+    # -----------------------------------------------------------------
+    # Report generation
+    # -----------------------------------------------------------------
+    - name: "Ensure reports directory exists"
+      ansible.builtin.file:
+        path: "{{ reports_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: "Save cleanup report"
+      ansible.builtin.copy:
+        content: |
+          # Cleanup - Remove All Smoke Test Resources
+
+          **Date:** {{ ansible_date_time.iso8601 }}
+
+          ## Deletion Summary
+
+          | Resource Type | Name | Result |
+          |---|---|---|
+          {% for r in _del_workflows.results | default([]) %}
+          | Workflow Job Template | {{ r.item.name }} | {{ 'Deleted' if r.changed | default(false) else ('Already absent' if not r.failed | default(false) else 'Error') }} |
+          {% endfor %}
+          {% for r in _del_job_templates.results | default([]) %}
+          | Job Template | {{ r.item.name }} | {{ 'Deleted' if r.changed | default(false) else ('Already absent' if not r.failed | default(false) else 'Error') }} |
+          {% endfor %}
+          {% for r in _del_inv_sources.results | default([]) %}
+          | Inventory Source | {{ r.item.name }} | {{ 'Deleted' if r.changed | default(false) else ('Already absent' if not r.failed | default(false) else 'Error') }} |
+          {% endfor %}
+          {% for r in _del_hosts.results | default([]) %}
+          | Host | {{ r.item.name }} | {{ 'Deleted' if r.changed | default(false) else ('Already absent' if not r.failed | default(false) else 'Error') }} |
+          {% endfor %}
+          {% for r in _del_inventories.results | default([]) %}
+          | Inventory | {{ r.item.name }} | {{ 'Deleted' if r.changed | default(false) else ('Already absent' if not r.failed | default(false) else 'Error') }} |
+          {% endfor %}
+          {% for r in _del_projects.results | default([]) %}
+          | Project | {{ r.item.name }} | {{ 'Deleted' if r.changed | default(false) else ('Already absent' if not r.failed | default(false) else 'Error') }} |
+          {% endfor %}
+          {% for r in _del_credentials.results | default([]) %}
+          | Credential | {{ r.item.name }} | {{ 'Deleted' if r.changed | default(false) else ('Already absent' if not r.failed | default(false) else 'Error') }} |
+          {% endfor %}
+          {% for r in _del_credential_types.results | default([]) %}
+          | Credential Type | {{ r.item.name }} | {{ 'Deleted' if r.changed | default(false) else ('Already absent' if not r.failed | default(false) else 'Error') }} |
+          {% endfor %}
+          {% for r in _del_ees.results | default([]) %}
+          | Execution Environment | {{ r.item.name }} | {{ 'Deleted' if r.changed | default(false) else ('Already absent' if not r.failed | default(false) else 'Error') }} |
+          {% endfor %}
+          {% for r in _del_organizations.results | default([]) %}
+          | Organization | {{ r.item.name }} | {{ 'Deleted' if r.changed | default(false) else ('Already absent' if not r.failed | default(false) else 'Error') }} |
+          {% endfor %}
+        dest: "{{ reports_dir }}/99_cleanup_report.md"
+        mode: '0644'
+
+    - name: "Display cleanup result"
+      ansible.builtin.debug:
+        msg: "Cleanup complete. Report saved to {{ reports_dir }}/99_cleanup_report.md"

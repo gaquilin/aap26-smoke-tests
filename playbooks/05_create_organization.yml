@@ -1,0 +1,154 @@
+# =============================================================================
+# Create an Organization
+# =============================================================================
+# Objective: Verify the Organization creation on AAP 2.6.
+#
+# Role: infra.aap_configuration.controller_organizations
+# Variable: controller_organizations
+#
+# Expected output: The Organization is correctly created and its Details
+#                  tab shows the correct configuration.
+# =============================================================================
+---
+- name: "Create Organization"
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  vars_files:
+    - ../credentials/credentials.yml
+  vars:
+    reports_dir: "{{ playbook_dir }}/../reports/{{ ansible_date_time.date }}"
+
+  tasks:
+    # -----------------------------------------------------------------
+    # Obtain OAuth token (standalone mode only)
+    # -----------------------------------------------------------------
+    - name: "Obtain OAuth token (standalone mode)"
+      ansible.builtin.uri:
+        url: "https://{{ aap_hostname }}/api/controller/v2/tokens/"
+        user: "{{ aap_username }}"
+        password: "{{ aap_password }}"
+        method: POST
+        force_basic_auth: true
+        validate_certs: "{{ aap_validate_certs }}"
+        status_code: 201
+      register: _authtoken_res
+      no_log: true
+      when: controller_oauthtoken is not defined
+
+    - name: "Set OAuth token (standalone mode)"
+      ansible.builtin.set_fact:
+        controller_oauthtoken: "{{ _authtoken_res.json.token }}"
+      when: _authtoken_res is not skipped
+      no_log: true
+
+    # -----------------------------------------------------------------
+    # Load template data (standalone mode)
+    # -----------------------------------------------------------------
+    - name: "Find organization templates (standalone mode)"
+      ansible.builtin.find:
+        paths: "{{ playbook_dir }}/../templates/organizations/"
+        patterns: "*.yml,*.yaml"
+      register: _template_files
+      when: smoke_organizations is not defined
+
+    - name: "Load organization templates (standalone mode)"
+      ansible.builtin.set_fact:
+        smoke_organizations: >-
+          {{ smoke_organizations | default([]) +
+             ((lookup('template', item.path) | from_yaml).controller_organizations | default([])) }}
+      loop: "{{ _template_files.files | default([]) }}"
+      loop_control:
+        label: "{{ item.path | basename }}"
+      when: _template_files is not skipped
+
+    - name: "Set organization data"
+      ansible.builtin.set_fact:
+        _organizations: "{{ smoke_organizations | default([]) }}"
+
+    # -----------------------------------------------------------------
+    # Create Organization via infra.aap_configuration role
+    # -----------------------------------------------------------------
+    - name: "Create Organizations"
+      ansible.builtin.include_role:
+        name: infra.aap_configuration.controller_organizations
+      vars:
+        aap_organizations: "{{ _organizations }}"
+        aap_token: "{{ controller_oauthtoken }}"
+
+    # -----------------------------------------------------------------
+    # Verify creation
+    # -----------------------------------------------------------------
+    - name: "Verify Organization creation"
+      ansible.builtin.uri:
+        url: "https://{{ controller_hostname }}/api/controller/v2/organizations/?search={{ item.name | urlencode }}"
+        method: GET
+        user: "{{ controller_username }}"
+        password: "{{ controller_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ controller_validate_certs }}"
+        status_code: [200]
+        return_content: true
+      loop: "{{ _organizations }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: org_verify
+
+    # -----------------------------------------------------------------
+    # Report generation
+    # -----------------------------------------------------------------
+    - name: "Set report status"
+      ansible.builtin.set_fact:
+        _overall_status: "{{ 'PASSED' if org_verify.results | rejectattr('failed', 'false') | list | length == 0 else 'FAILED' }}"
+        _status_icon: "{{ '✅' if org_verify.results | rejectattr('failed', 'false') | list | length == 0 else '❌' }}"
+
+    - name: "Save report"
+      ansible.builtin.copy:
+        content: |
+          # Create Organization
+
+          **Date:** {{ ansible_date_time.iso8601 }}
+          **Result:** {{ _status_icon }} {{ _overall_status }}
+
+          ## Resources Created
+
+          {% for org in _organizations %}
+          ### Organization: {{ org.name }}
+
+          | Field | Value |
+          |---|---|
+          | **Resource Type** | Organization |
+          | **Name** | {{ org.name }} |
+          | **Description** | {{ org.description | default('N/A') }} |
+          {% if org.galaxy_credentials is defined %}
+          | **Galaxy Credentials** | {{ org.galaxy_credentials | join(', ') }} |
+          {% endif %}
+          {% if org.instance_groups is defined %}
+          | **Instance Groups** | {{ org.instance_groups | join(', ') }} |
+          {% endif %}
+          | **State** | {{ org.state | default('present') }} |
+
+          {% endfor %}
+          ## Verification
+
+          | Organization | Found on AAP |
+          |---|---|
+          {% for result in org_verify.results %}
+          | {{ result.item.name }} | {{ '✅ Yes' if result.json.count | int > 0 else '❌ No' }} (count: {{ result.json.count }}) |
+          {% endfor %}
+        dest: "{{ reports_dir }}/05_create_organization_report.md"
+        mode: '0644'
+
+    - name: "Display test result"
+      ansible.builtin.debug:
+        msg: "Create Organization: {{ _overall_status }}"
+
+    - name: "Assert Organizations created"
+      ansible.builtin.assert:
+        that:
+          - item.json.count | int > 0
+        fail_msg: "Organization '{{ item.item.name }}' not found"
+        success_msg: "Organization '{{ item.item.name }}' created successfully"
+      loop: "{{ org_verify.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"

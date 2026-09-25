@@ -1,0 +1,356 @@
+# =============================================================================
+# MASTER PLAYBOOK: AAP 2.6 Smoke Regression Test Suite
+# =============================================================================
+#
+# Purpose:
+#   Main orchestrator that runs all smoke regression tests to verify the
+#   correct operation of AAP 2.6.
+#
+# Workflow:
+#   1. Data Processing: Scans the templates/ folder, loads all YAML files,
+#      and maps each object to the correct variable expected by the
+#      infra.aap_configuration collection roles.
+#   2. Sequential execution of each test (3.1 -> 3.12) via import_playbook,
+#      respecting dependency order.
+#
+# Data structure:
+#   Each file in templates/ contains a root key matching the role variable
+#   (e.g. controller_organizations, controller_templates).
+#   The Data Processing uses the Jinja2 pattern:
+#     {{ all_yaml_data | selectattr('path', 'search', '<pattern>')
+#        | map(attribute='content.<variable_name>')
+#        | select('defined') | reject('none') | flatten | list }}
+#
+# Role -> variable mapping for infra.aap_configuration collection:
+#   controller_execution_environments   -> controller_execution_environments
+#   controller_organizations            -> controller_organizations
+#   controller_credential_types         -> controller_credential_types
+#   controller_credentials              -> controller_credentials
+#   controller_projects                 -> controller_projects
+#   controller_inventories              -> controller_inventories
+#   controller_inventory_sources        -> controller_inventory_sources
+#   controller_hosts                    -> controller_hosts
+#   controller_job_templates            -> controller_templates / controller_job_templates
+#
+# Run the full suite:
+#   ansible-playbook playbooks/smoke_test_master.yml --ask-vault-pass
+#   ansible-playbook playbooks/smoke_test_master.yml --vault-password-file /path
+#
+# Run a single test (standalone):
+#   ansible-playbook playbooks/05_create_organization.yml --ask-vault-pass
+# =============================================================================
+---
+# =========================================================================
+# PLAY 0: Data Processing - Load and map template data
+# =========================================================================
+- name: "AAP 2.6 Smoke Test - Data Processing"
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  vars_files:
+    - ../credentials/credentials.yml
+  vars:
+    templates_dir: "{{ playbook_dir }}/../templates"
+    reports_dir: "{{ playbook_dir }}/../reports/{{ ansible_date_time.date }}"
+
+  tasks:
+    # -----------------------------------------------------------------
+    # Prepare reports directory
+    # -----------------------------------------------------------------
+    - name: "Ensure reports directory exists"
+      ansible.builtin.file:
+        path: "{{ reports_dir }}"
+        state: directory
+        mode: '0755'
+
+    # -----------------------------------------------------------------
+    # Obtain OAuth token for AAP 2.6 API authentication
+    # -----------------------------------------------------------------
+    - name: "Obtain OAuth token from AAP 2.6"
+      ansible.builtin.uri:
+        url: "https://{{ aap_hostname }}/api/controller/v2/tokens/"
+        user: "{{ aap_username }}"
+        password: "{{ aap_password }}"
+        method: POST
+        force_basic_auth: true
+        validate_certs: "{{ aap_validate_certs }}"
+        status_code: 201
+      register: _authtoken_res
+      no_log: true
+
+    - name: "Set OAuth token facts"
+      ansible.builtin.set_fact:
+        controller_oauthtoken: "{{ _authtoken_res.json.token }}"
+        controller_oauthtoken_url: "{{ _authtoken_res.json.url }}"
+
+    # -----------------------------------------------------------------
+    # Phase 1: Scan and load template files
+    # -----------------------------------------------------------------
+    - name: "Scan template files"
+      ansible.builtin.find:
+        paths: "{{ templates_dir }}"
+        patterns: "*.yml,*.yaml"
+        excludes: "ee_definition"
+        recurse: true
+      register: template_files_raw
+
+    - name: "Filter out ee_definition files"
+      ansible.builtin.set_fact:
+        template_files:
+          files: "{{ template_files_raw.files | rejectattr('path', 'search', 'ee_definition') | list }}"
+
+    - name: "Display discovered templates"
+      ansible.builtin.debug:
+        msg: "Found {{ template_files.files | length }} template files: {{ template_files.files | map(attribute='path') | map('basename') | list }}"
+
+    - name: "Load all template data into all_yaml_data"
+      ansible.builtin.set_fact:
+        all_yaml_data: >-
+          {{
+            all_yaml_data | default([]) +
+            [{
+              'path': item.path,
+              'content': lookup('template', item.path) | from_yaml
+            }]
+          }}
+      loop: "{{ template_files.files }}"
+      loop_control:
+        label: "Loading: {{ item.path | basename }}"
+
+    # -----------------------------------------------------------------
+    # Phase 2: Extract resources - Map objects to role variables
+    # Each smoke_* variable is set as a host fact and made available
+    # to all subsequent plays (import_playbook).
+    # -----------------------------------------------------------------
+    - name: "Extract and map resources from template data"
+      ansible.builtin.set_fact:
+        # Execution Environments
+        # Role: infra.aap_configuration.controller_execution_environments
+        smoke_execution_environments: >-
+          {{
+            all_yaml_data
+            | selectattr('path', 'search', 'execution_environments')
+            | map(attribute='content.controller_execution_environments')
+            | select('defined')
+            | reject('none')
+            | flatten
+            | list
+          }}
+        # Organizations
+        # Role: infra.aap_configuration.controller_organizations
+        smoke_organizations: >-
+          {{
+            all_yaml_data
+            | selectattr('path', 'search', 'organizations')
+            | map(attribute='content.controller_organizations')
+            | select('defined')
+            | reject('none')
+            | flatten
+            | list
+          }}
+        # Credential Types
+        # Role: infra.aap_configuration.controller_credential_types
+        smoke_credential_types: >-
+          {{
+            all_yaml_data
+            | selectattr('path', 'search', 'credential_types')
+            | map(attribute='content.controller_credential_types')
+            | select('defined')
+            | reject('none')
+            | flatten
+            | list
+          }}
+        # Credentials (all types - SCM, custom, machine, vault, etc.)
+        # Role: infra.aap_configuration.controller_credentials
+        smoke_credentials: >-
+          {{
+            all_yaml_data
+            | selectattr('path', 'search', 'credentials/')
+            | map(attribute='content.controller_credentials')
+            | select('defined')
+            | reject('none')
+            | flatten
+            | list
+          }}
+        # Projects
+        # Role: infra.aap_configuration.controller_projects
+        smoke_projects: >-
+          {{
+            all_yaml_data
+            | selectattr('path', 'search', 'projects')
+            | map(attribute='content.controller_projects')
+            | select('defined')
+            | reject('none')
+            | flatten
+            | list
+          }}
+        # Inventories
+        # Role: infra.aap_configuration.controller_inventories
+        smoke_inventories: >-
+          {{
+            all_yaml_data
+            | selectattr('path', 'search', 'inventories')
+            | map(attribute='content.controller_inventories')
+            | select('defined')
+            | reject('none')
+            | flatten
+            | list
+          }}
+        # Inventory Sources
+        # Role: infra.aap_configuration.controller_inventory_sources
+        smoke_inventory_sources: >-
+          {{
+            all_yaml_data
+            | selectattr('path', 'search', 'inventories')
+            | map(attribute='content.controller_inventory_sources')
+            | select('defined')
+            | reject('none')
+            | flatten
+            | list
+          }}
+        # Hosts
+        # Role: infra.aap_configuration.controller_hosts
+        smoke_hosts: >-
+          {{
+            all_yaml_data
+            | selectattr('path', 'search', 'inventories')
+            | map(attribute='content.controller_hosts')
+            | select('defined')
+            | reject('none')
+            | flatten
+            | list
+          }}
+        # Job Templates
+        # Role: infra.aap_configuration.controller_job_templates
+        # Variables: controller_templates / controller_job_templates
+        smoke_job_templates: >-
+          {{
+            all_yaml_data
+            | selectattr('path', 'search', 'job_templates')
+            | map(attribute='content.controller_templates')
+            | select('defined')
+            | reject('none')
+            | flatten
+            | list
+          }}
+        # Workflow Job Templates
+        # Role: infra.aap_configuration.controller_workflow_job_templates
+        # Variable: controller_workflows
+        smoke_workflows: >-
+          {{
+            all_yaml_data
+            | selectattr('path', 'search', 'workflow_job_templates')
+            | map(attribute='content.controller_workflows')
+            | select('defined')
+            | reject('none')
+            | flatten
+            | list
+          }}
+
+    # -----------------------------------------------------------------
+    # Extracted resources summary
+    # -----------------------------------------------------------------
+    - name: "Display extracted resource summary"
+      ansible.builtin.debug:
+        msg:
+          - "=== AAP 2.6 Smoke Test - Resource Summary ==="
+          - "Execution Environments: {{ smoke_execution_environments | length }}"
+          - "Organizations:          {{ smoke_organizations | length }}"
+          - "Credential Types:       {{ smoke_credential_types | length }}"
+          - "Credentials:            {{ smoke_credentials | length }}"
+          - "Projects:               {{ smoke_projects | length }}"
+          - "Inventories:            {{ smoke_inventories | length }}"
+          - "Inventory Sources:      {{ smoke_inventory_sources | length }}"
+          - "Hosts:                  {{ smoke_hosts | length }}"
+          - "Job Templates:          {{ smoke_job_templates | length }}"
+          - "Workflow Templates:     {{ smoke_workflows | length }}"
+
+    # -----------------------------------------------------------------
+    # Save initial report
+    # -----------------------------------------------------------------
+    - name: "Save Data Processing report"
+      ansible.builtin.copy:
+        content: |
+          # Data Processing
+
+          **Date:** {{ ansible_date_time.iso8601 }}
+          **Result:** ✅ COMPLETED
+
+          ## Templates Loaded
+
+          {{ template_files.files | length }} template files loaded from `templates/` directory.
+
+          ## Resources Extracted
+
+          | Resource Type | Count |
+          |---|---|
+          | Execution Environments | {{ smoke_execution_environments | length }} |
+          | Organizations | {{ smoke_organizations | length }} |
+          | Credential Types | {{ smoke_credential_types | length }} |
+          | Credentials | {{ smoke_credentials | length }} |
+          | Projects | {{ smoke_projects | length }} |
+          | Inventories | {{ smoke_inventories | length }} |
+          | Inventory Sources | {{ smoke_inventory_sources | length }} |
+          | Hosts | {{ smoke_hosts | length }} |
+          | Job Templates | {{ smoke_job_templates | length }} |
+          | Workflow Templates | {{ smoke_workflows | length }} |
+        dest: "{{ reports_dir }}/00_data_processing_report.md"
+        mode: '0644'
+
+# =========================================================================
+# TEST SUITE: Sequential execution of all tests
+# =========================================================================
+# Each imported playbook receives the smoke_* facts set in Play 0.
+# When run standalone, each playbook loads its own data directly from
+# the corresponding template file.
+# =========================================================================
+
+# Platform Availability and Login
+- import_playbook: 01_platform_availability.yml
+
+# Build a Custom Execution Environment
+# NOTE: Requires RHEL host with podman, ansible-builder.
+# Pass registry credentials via extra vars: -e "registry_username=..." -e "registry_password=..."
+- import_playbook: 02_build_custom_ee.yml
+
+# Push the EE to Private Automation Hub
+# Prerequisite: Build Custom EE
+- import_playbook: 03_push_ee_to_hub.yml
+
+# Register the EE on Automation Controller
+# Prerequisite: Push EE to Hub
+- import_playbook: 04_register_ee.yml
+
+# Create an Organization
+- import_playbook: 05_create_organization.yml
+
+# Create Credential Types (BEFORE credentials)
+- import_playbook: 08_create_credential_type.yml
+
+# Create Credentials (all types: SCM, custom, machine, etc.)
+# Prerequisite: Create Organization, Create Credential Types
+- import_playbook: 06_create_credentials.yml
+
+# Project Synchronization
+# Prerequisite: Create Credentials
+- import_playbook: 07_project_sync.yml
+
+# Create an Inventory with Inventory Source
+# Prerequisites: Create Organization, Project Synchronization
+- import_playbook: 10_create_inventory.yml
+
+# Create a Job Template
+# Prerequisites: Register EE, Create Organization, Project Sync, Create Inventory
+- import_playbook: 11_create_job_template.yml
+
+# Launch and Verify the Job Template
+# Prerequisite: Create Job Template
+- import_playbook: 12_launch_job_template.yml
+
+# Create a Workflow Job Template
+# Prerequisite: Create Job Template
+- import_playbook: 13_create_workflow_template.yml
+
+# Launch and Verify the Workflow Job Template
+# Prerequisite: Create Workflow Template
+- import_playbook: 14_launch_workflow_template.yml

@@ -1,0 +1,20 @@
+# =============================================================================
+# Template: Project for AAP 2.6 Smoke Test
+# Role: infra.aap_configuration.controller_projects
+# Expected variable: controller_projects
+# Prerequisites: Organization and SCM Credential already created
+# =============================================================================
+---
+controller_projects:
+  - name: "Smoke Test Project"
+    description: "Project for AAP 2.6 smoke regression testing"
+    organization: "Smoke_Test_Organization"
+    scm_type: "git"
+    scm_url: "https://github.com/ansible/ansible-tower-samples.git"
+    scm_branch: "master"
+    # scm_url: "CHANGEME_SCM_URL"
+    # scm_branch: "CHANGEME_SCM_BRANCH"
+    scm_credential: "Smoke Test - GitHub SCM Credential"
+    scm_update_on_launch: false
+    wait: true
+    state: present

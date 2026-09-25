@@ -1,0 +1,24 @@
+# =============================================================================
+# Template: Job Template for AAP 2.6 Smoke Test
+# Role: infra.aap_configuration.controller_job_templates
+# Expected variables: controller_templates / controller_job_templates
+# Prerequisites: Organization, Project, Inventory, EE, and Credentials already created
+# =============================================================================
+---
+controller_templates:
+  - name: "Smoke Test Job Template"
+    description: "Job template for AAP 2.6 smoke regression testing"
+    organization: "Smoke_Test_Organization"
+    project: "Smoke Test Project"
+    playbook: "hello_world.yml"
+    inventory: "Smoke Test Inventory"
+    execution_environment: "Smoke Test EE"
+    credentials:
+      - "Smoke Test Custom Credential"
+    job_type: "run"
+    job_slice_count: 1
+    ask_job_slice_count_on_launch: true
+    extra_vars:
+      smoke_test_var: "Hello from AAP 2.6 Smoke Test"
+    allow_simultaneous: true
+    state: present

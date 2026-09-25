@@ -1,0 +1,161 @@
+# =============================================================================
+# Create a Job Template
+# =============================================================================
+# Objective: Verify the Job Template creation with Extra Variables.
+#
+# Role: infra.aap_configuration.controller_job_templates
+# Variables: controller_templates / controller_job_templates
+#
+# Prerequisites:
+#   - Required Credentials created
+#   - Project synchronized
+#   - Inventory created
+#   - Execution Environment registered
+#
+# Expected output: The Template is saved and its Details tab shows the
+#                  correct configuration.
+# =============================================================================
+---
+- name: "Create Job Template"
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  vars_files:
+    - ../credentials/credentials.yml
+  vars:
+    reports_dir: "{{ playbook_dir }}/../reports/{{ ansible_date_time.date }}"
+
+  tasks:
+    # -----------------------------------------------------------------
+    # Obtain OAuth token (standalone mode only)
+    # -----------------------------------------------------------------
+    - name: "Obtain OAuth token (standalone mode)"
+      ansible.builtin.uri:
+        url: "https://{{ aap_hostname }}/api/controller/v2/tokens/"
+        user: "{{ aap_username }}"
+        password: "{{ aap_password }}"
+        method: POST
+        force_basic_auth: true
+        validate_certs: "{{ aap_validate_certs }}"
+        status_code: 201
+      register: _authtoken_res
+      no_log: true
+      when: controller_oauthtoken is not defined
+
+    - name: "Set OAuth token (standalone mode)"
+      ansible.builtin.set_fact:
+        controller_oauthtoken: "{{ _authtoken_res.json.token }}"
+      when: _authtoken_res is not skipped
+      no_log: true
+
+    # -----------------------------------------------------------------
+    # Load template data (standalone mode)
+    # -----------------------------------------------------------------
+    - name: "Find job template files (standalone mode)"
+      ansible.builtin.find:
+        paths: "{{ playbook_dir }}/../templates/job_templates/"
+        patterns: "*.yml,*.yaml"
+      register: _template_files
+      when: smoke_job_templates is not defined
+
+    - name: "Load job templates (standalone mode)"
+      ansible.builtin.set_fact:
+        smoke_job_templates: >-
+          {{ smoke_job_templates | default([]) +
+             ((lookup('template', item.path) | from_yaml).controller_templates | default([])) }}
+      loop: "{{ _template_files.files | default([]) }}"
+      loop_control:
+        label: "{{ item.path | basename }}"
+      when: _template_files is not skipped
+
+    - name: "Set job template data"
+      ansible.builtin.set_fact:
+        _templates: "{{ smoke_job_templates | default([]) }}"
+
+    # -----------------------------------------------------------------
+    # Create Job Template via infra.aap_configuration role
+    # The controller_job_templates role accepts both controller_templates
+    # and controller_job_templates as variable names
+    # -----------------------------------------------------------------
+    - name: "Create Job Templates"
+      ansible.builtin.include_role:
+        name: infra.aap_configuration.controller_job_templates
+      vars:
+        controller_templates: "{{ _templates }}"
+        aap_token: "{{ controller_oauthtoken }}"
+
+    # -----------------------------------------------------------------
+    # Verify creation
+    # -----------------------------------------------------------------
+    - name: "Verify Job Template creation"
+      ansible.builtin.uri:
+        url: "https://{{ controller_hostname }}/api/controller/v2/job_templates/?search={{ item.name | urlencode }}"
+        method: GET
+        user: "{{ controller_username }}"
+        password: "{{ controller_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ controller_validate_certs }}"
+        status_code: [200]
+        return_content: true
+      loop: "{{ _templates }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: jt_verify
+
+    # -----------------------------------------------------------------
+    # Report generation
+    # -----------------------------------------------------------------
+    - name: "Set report status"
+      ansible.builtin.set_fact:
+        _overall_status: "{{ 'PASSED' if jt_verify.results | rejectattr('failed', 'false') | list | length == 0 else 'FAILED' }}"
+        _status_icon: "{{ '✅' if jt_verify.results | rejectattr('failed', 'false') | list | length == 0 else '❌' }}"
+
+    - name: "Save report"
+      ansible.builtin.copy:
+        content: |
+          # Create Job Template
+
+          **Date:** {{ ansible_date_time.iso8601 }}
+          **Result:** {{ _status_icon }} {{ _overall_status }}
+
+          ## Resources Created
+
+          {% for jt in _templates %}
+          ### Job Template: {{ jt.name }}
+
+          | Field | Value |
+          |---|---|
+          | **Resource Type** | Job Template |
+          | **Name** | {{ jt.name }} |
+          | **Organization** | {{ jt.organization | default('N/A') }} |
+          | **Project** | {{ jt.project | default('N/A') }} |
+          | **Playbook** | {{ jt.playbook | default('N/A') }} |
+          | **Inventory** | {{ jt.inventory | default('N/A') }} |
+          | **Execution Environment** | {{ jt.execution_environment | default('N/A') }} |
+          | **Job Type** | {{ jt.job_type | default('run') }} |
+          | **Concurrent Jobs** | {{ jt.allow_simultaneous | default(false) }} |
+
+          {% endfor %}
+          ## Verification
+
+          | Job Template | Found on AAP |
+          |---|---|
+          {% for result in jt_verify.results %}
+          | {{ result.item.name }} | {{ '✅ Yes' if result.json.count | int > 0 else '❌ No' }} |
+          {% endfor %}
+        dest: "{{ reports_dir }}/11_create_job_template_report.md"
+        mode: '0644'
+
+    - name: "Display test result"
+      ansible.builtin.debug:
+        msg: "Create Job Template: {{ _overall_status }}"
+
+    - name: "Assert Job Templates created"
+      ansible.builtin.assert:
+        that:
+          - item.json.count | int > 0
+        fail_msg: "Job Template '{{ item.item.name }}' not found"
+        success_msg: "Job Template '{{ item.item.name }}' created successfully"
+      loop: "{{ jt_verify.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"

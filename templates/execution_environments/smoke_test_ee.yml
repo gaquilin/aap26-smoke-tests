@@ -1,0 +1,15 @@
+# =============================================================================
+# Template: Execution Environment for AAP 2.6 Smoke Test
+# Role: infra.aap_configuration.controller_execution_environments
+# Expected variable: controller_execution_environments
+# Prerequisite: EE image pushed to Private Automation Hub
+# =============================================================================
+---
+controller_execution_environments:
+  - name: "Smoke Test EE"
+    description: "Custom Execution Environment for AAP 2.6 smoke testing"
+    # Image must point to the Private Automation Hub with namespace
+    # Format: <ah_hostname>/<namespace>/smoke-test-ee:latest
+    image: "{{ ah_hostname }}/{{ aap_username }}/smoke-test-ee:latest"
+    pull: "missing"
+    state: present

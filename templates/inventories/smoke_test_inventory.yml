@@ -1,0 +1,37 @@
+# =============================================================================
+# Template: Inventory and Inventory Source for AAP 2.6 Smoke Test
+# Roles:
+#   - infra.aap_configuration.controller_inventories
+#   - infra.aap_configuration.controller_inventory_sources
+#   - infra.aap_configuration.controller_hosts
+# Expected variables:
+#   - controller_inventories
+#   - controller_inventory_sources
+#   - controller_hosts
+# Prerequisites: Organization, Project, and Credential already created
+# =============================================================================
+---
+controller_inventories:
+  - name: "Smoke Test Inventory"
+    description: "Inventory for AAP 2.6 smoke regression testing"
+    organization: "Smoke_Test_Organization"
+    state: present
+
+controller_inventory_sources:
+  - name: "Smoke Test Inventory Source"
+    description: "Inventory source from project for smoke testing"
+    inventory: "Smoke Test Inventory"
+    source: "scm"
+    source_project: "Smoke Test Project"
+    source_path: "inventory"
+    overwrite: true
+    overwrite_vars: true
+    update_on_launch: false
+    state: present
+
+controller_hosts:
+  - name: "localhost"
+    inventory: "Smoke Test Inventory"
+    variables:
+      ansible_connection: local
+    state: present

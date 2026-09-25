@@ -1,0 +1,152 @@
+# =============================================================================
+# Register the Execution Environment on Automation Controller
+# =============================================================================
+# Objective: Verify that the EE pushed to the Private Automation Hub can be
+#            registered and used by the Automation Controller.
+#
+# Role: infra.aap_configuration.controller_execution_environments
+# Variable: controller_execution_environments
+#
+# Prerequisites:
+#   - Push EE to Hub test passed
+#   - Credential for Private Automation Hub created
+#
+# Expected output: The EE is saved and selectable in Job Templates.
+# =============================================================================
+---
+- name: "Register EE on Automation Controller"
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  vars_files:
+    - ../credentials/credentials.yml
+  vars:
+    reports_dir: "{{ playbook_dir }}/../reports/{{ ansible_date_time.date }}"
+
+  tasks:
+    # -----------------------------------------------------------------
+    # Obtain OAuth token (standalone mode only)
+    # -----------------------------------------------------------------
+    - name: "Obtain OAuth token (standalone mode)"
+      ansible.builtin.uri:
+        url: "https://{{ aap_hostname }}/api/controller/v2/tokens/"
+        user: "{{ aap_username }}"
+        password: "{{ aap_password }}"
+        method: POST
+        force_basic_auth: true
+        validate_certs: "{{ aap_validate_certs }}"
+        status_code: 201
+      register: _authtoken_res
+      no_log: true
+      when: controller_oauthtoken is not defined
+
+    - name: "Set OAuth token (standalone mode)"
+      ansible.builtin.set_fact:
+        controller_oauthtoken: "{{ _authtoken_res.json.token }}"
+      when: _authtoken_res is not skipped
+      no_log: true
+
+    # -----------------------------------------------------------------
+    # Load template data (standalone mode)
+    # -----------------------------------------------------------------
+    - name: "Find EE templates (standalone mode)"
+      ansible.builtin.find:
+        paths: "{{ playbook_dir }}/../templates/execution_environments/"
+        patterns: "*.yml,*.yaml"
+      register: _template_files
+      when: smoke_execution_environments is not defined
+
+    - name: "Load EE templates (standalone mode)"
+      ansible.builtin.set_fact:
+        smoke_execution_environments: >-
+          {{ smoke_execution_environments | default([]) +
+             ((lookup('template', item.path) | from_yaml).controller_execution_environments | default([])) }}
+      loop: "{{ _template_files.files | default([]) }}"
+      loop_control:
+        label: "{{ item.path | basename }}"
+      when: _template_files is not skipped
+
+    - name: "Set EE data"
+      ansible.builtin.set_fact:
+        _execution_environments: "{{ smoke_execution_environments | default([]) }}"
+
+    # -----------------------------------------------------------------
+    # Register EE via infra.aap_configuration role
+    # -----------------------------------------------------------------
+    - name: "Register Execution Environments on Controller"
+      ansible.builtin.include_role:
+        name: infra.aap_configuration.controller_execution_environments
+      vars:
+        controller_execution_environments: "{{ _execution_environments }}"
+        aap_token: "{{ controller_oauthtoken }}"
+
+    # -----------------------------------------------------------------
+    # Verify registration
+    # -----------------------------------------------------------------
+    - name: "Verify EE registration on Controller"
+      ansible.builtin.uri:
+        url: "https://{{ controller_hostname }}/api/controller/v2/execution_environments/?search={{ item.name | urlencode }}"
+        method: GET
+        user: "{{ controller_username }}"
+        password: "{{ controller_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ controller_validate_certs }}"
+        status_code: [200]
+        return_content: true
+      loop: "{{ _execution_environments }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: ee_verify
+
+    # -----------------------------------------------------------------
+    # Report generation
+    # -----------------------------------------------------------------
+    - name: "Set report status"
+      ansible.builtin.set_fact:
+        _overall_status: "{{ 'PASSED' if ee_verify.results | rejectattr('failed', 'false') | list | length == 0 else 'FAILED' }}"
+        _status_icon: "{{ '✅' if ee_verify.results | rejectattr('failed', 'false') | list | length == 0 else '❌' }}"
+
+    - name: "Save report"
+      ansible.builtin.copy:
+        content: |
+          # Register EE on Automation Controller
+
+          **Date:** {{ ansible_date_time.iso8601 }}
+          **Result:** {{ _status_icon }} {{ _overall_status }}
+
+          ## Resources Created
+
+          {% for ee in _execution_environments %}
+          ### Execution Environment: {{ ee.name }}
+
+          | Field | Value |
+          |---|---|
+          | **Resource Type** | Execution Environment |
+          | **Name** | {{ ee.name }} |
+          | **Image** | {{ ee.image | default('N/A') }} |
+          | **Pull** | {{ ee.pull | default('N/A') }} |
+
+          {% endfor %}
+          ## Verification
+
+          | Execution Environment | Found on AAP |
+          |---|---|
+          {% for result in ee_verify.results %}
+          | {{ result.item.name }} | {{ '✅ Yes' if result.json.count | int > 0 else '❌ No' }} |
+          {% endfor %}
+        dest: "{{ reports_dir }}/04_register_ee_report.md"
+        mode: '0644'
+
+    - name: "Display test result"
+      ansible.builtin.debug:
+        msg: "Register EE: {{ _overall_status }}"
+
+    - name: "Assert EE registered successfully"
+      ansible.builtin.assert:
+        that:
+          - item.json.count | int > 0
+        fail_msg: "EE '{{ item.item.name }}' not found on Controller"
+        success_msg: "EE '{{ item.item.name }}' registered successfully"
+      loop: "{{ ee_verify.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
