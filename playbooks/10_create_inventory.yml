@@ -5,11 +5,12 @@
   gather_facts: true
   vars_files:
     - ../credentials/credentials.yml
+    - ../vars/main.yml
   vars:
     reports_dir: "{{ playbook_dir }}/../reports/{{ ansible_date_time.date }}"
 
   tasks:
-    - name: "Obtain OAuth token (standalone mode)"
+    - name: "Obtain OAuth token"
       ansible.builtin.uri:
         url: "https://{{ aap_hostname }}/api/controller/v2/tokens/"
         user: "{{ aap_username }}"
@@ -20,12 +21,11 @@
         status_code: 201
       register: _authtoken_res
       no_log: true
-      when: controller_oauthtoken is not defined
 
-    - name: "Set OAuth token (standalone mode)"
+    - name: "Set OAuth token"
       ansible.builtin.set_fact:
         controller_oauthtoken: "{{ _authtoken_res.json.token }}"
-      when: _authtoken_res is not skipped
+        controller_oauthtoken_url: "{{ _authtoken_res.json.url }}"
       no_log: true
 
     - name: "Find inventory templates (standalone mode)"
@@ -172,48 +172,18 @@
         _overall_status: "{{ 'PASSED' if inv_verify.results | rejectattr('failed', 'false') | list | length == 0 else 'FAILED' }}"
         _status_icon: "{{ '✅' if inv_verify.results | rejectattr('failed', 'false') | list | length == 0 else '❌' }}"
 
-    - name: "Save report"
-      ansible.builtin.copy:
-        content: |
-          # Create Inventory with Inventory Source
-
-          **Date:** {{ ansible_date_time.iso8601 }}
-          **Result:** {{ _status_icon }} {{ _overall_status }}
-
-          ## Resources Created
-
-          {% for inv in _inventories %}
-          ### Inventory: {{ inv.name }}
-
-          | Field | Value |
-          |---|---|
-          | **Resource Type** | Inventory |
-          | **Name** | {{ inv.name }} |
-          | **Organization** | {{ inv.organization | default('N/A') }} |
-
-          {% endfor %}
-          {% for src in _inventory_sources %}
-          ### Inventory Source: {{ src.name }}
-
-          | Field | Value |
-          |---|---|
-          | **Resource Type** | Inventory Source |
-          | **Name** | {{ src.name }} |
-          | **Source** | {{ src.source | default('N/A') }} |
-          | **Project** | {{ src.source_project | default('N/A') }} |
-
-          {% endfor %}
-          ## Verification
-
-          | Resource | Status |
-          |---|---|
-          {% for result in inv_verify.results %}
-          | Inventory: {{ result.item.name }} | {{ '✅ Found' if result.json.count | int > 0 else '❌ Not Found' }} |
-          {% endfor %}
-          | Hosts Count | {{ (hosts_verify.json.count | default(0)) if hosts_verify is defined and hosts_verify is success else 0 }} |
-          | Ad Hoc Ping | {{ (adhoc_status.json.status | default('not_executed')) if adhoc_status is defined else 'not_executed' }} |
-        dest: "{{ reports_dir }}/10_create_inventory_report.md"
-        mode: '0644'
+    - name: "Register test result"
+      ansible.builtin.set_fact:
+        smoke_test_results: >-
+          {{ smoke_test_results | default({}) | combine({
+            'create_inventory': {
+              'name': 'Create Inventory',
+              'status': _overall_status,
+              'details': 'Inventory "' ~ (_inventories | map(attribute='name') | join('", "')) ~ '" created successfully with ' ~ (((hosts_verify.json.count | default(0)) if hosts_verify is defined and hosts_verify is success else 0) | string) ~ ' host(s) — Ad Hoc ping: ' ~ ((adhoc_status.json.status | default('not executed')) if adhoc_status is defined else 'not executed')
+              if _overall_status == 'PASSED'
+              else 'Failed to create Inventory on Automation Controller'
+            }
+          }) }}
 
     - name: "Display test result"
       ansible.builtin.debug:
@@ -221,3 +191,14 @@
           Create Inventory: {{ _overall_status }}
           | Hosts: {{ (hosts_verify.json.count | default(0)) if hosts_verify is defined and hosts_verify is success else 0 }}
           | Ad Hoc Ping: {{ (adhoc_status.json.status | default('skipped')) if adhoc_status is defined and adhoc_status is not skipped else 'skipped' }}
+
+    - name: "Delete OAuth token"
+      ansible.builtin.uri:
+        url: "https://{{ aap_hostname }}{{ controller_oauthtoken_url }}"
+        user: "{{ aap_username }}"
+        password: "{{ aap_password }}"
+        method: DELETE
+        force_basic_auth: true
+        validate_certs: "{{ aap_validate_certs }}"
+        status_code: 204
+      when: controller_oauthtoken_url is defined

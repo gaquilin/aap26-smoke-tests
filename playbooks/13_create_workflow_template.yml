@@ -9,7 +9,7 @@
     reports_dir: "{{ playbook_dir }}/../reports/{{ ansible_date_time.date }}"
 
   tasks:
-    - name: "Obtain OAuth token (standalone mode)"
+    - name: "Obtain OAuth token"
       ansible.builtin.uri:
         url: "https://{{ aap_hostname }}/api/controller/v2/tokens/"
         user: "{{ aap_username }}"
@@ -20,12 +20,11 @@
         status_code: 201
       register: _authtoken_res
       no_log: true
-      when: controller_oauthtoken is not defined
 
-    - name: "Set OAuth token (standalone mode)"
+    - name: "Set OAuth token"
       ansible.builtin.set_fact:
         controller_oauthtoken: "{{ _authtoken_res.json.token }}"
-      when: _authtoken_res is not skipped
+        controller_oauthtoken_url: "{{ _authtoken_res.json.url }}"
       no_log: true
 
     - name: "Find workflow templates (standalone mode)"
@@ -80,39 +79,18 @@
         _overall_status: "{{ 'PASSED' if wf_verify.results | rejectattr('failed', 'false') | list | length == 0 else 'FAILED' }}"
         _status_icon: "{{ '✅' if wf_verify.results | rejectattr('failed', 'false') | list | length == 0 else '❌' }}"
 
-    - name: "Save report"
-      ansible.builtin.copy:
-        content: |
-          # Create Workflow Job Template
-
-          **Date:** {{ ansible_date_time.iso8601 }}
-          **Result:** {{ _status_icon }} {{ _overall_status }}
-
-          ## Resources Created
-
-          {% for wf in _workflows %}
-          ### Workflow: {{ wf.name }}
-
-          | Field | Value |
-          |---|---|
-          | **Resource Type** | Workflow Job Template |
-          | **Name** | {{ wf.name }} |
-          | **Organization** | {{ wf.organization | default('N/A') }} |
-          | **Nodes** | {{ wf.simplified_workflow_nodes | length }} |
-          {% for node in wf.simplified_workflow_nodes %}
-          | **Node: {{ node.identifier }}** | {{ node.unified_job_template }} |
-          {% endfor %}
-
-          {% endfor %}
-          ## Verification
-
-          | Workflow | Found on AAP |
-          |---|---|
-          {% for result in wf_verify.results %}
-          | {{ result.item.name }} | {{ '✅ Yes' if result.json.count | int > 0 else '❌ No' }} |
-          {% endfor %}
-        dest: "{{ reports_dir }}/13_create_workflow_template_report.md"
-        mode: '0644'
+    - name: "Register test result"
+      ansible.builtin.set_fact:
+        smoke_test_results: >-
+          {{ smoke_test_results | default({}) | combine({
+            'create_workflow_template': {
+              'name': 'Create Workflow Template',
+              'status': _overall_status,
+              'details': 'Workflow Job Template "' ~ (_workflows | map(attribute='name') | join('", "')) ~ '" has been created successfully on Automation Controller'
+              if _overall_status == 'PASSED'
+              else 'Failed to create Workflow Job Template(s) on Automation Controller'
+            }
+          }) }}
 
     - name: "Display test result"
       ansible.builtin.debug:
@@ -127,3 +105,14 @@
       loop: "{{ wf_verify.results }}"
       loop_control:
         label: "{{ item.item.name }}"
+
+    - name: "Delete OAuth token"
+      ansible.builtin.uri:
+        url: "https://{{ aap_hostname }}{{ controller_oauthtoken_url }}"
+        user: "{{ aap_username }}"
+        password: "{{ aap_password }}"
+        method: DELETE
+        force_basic_auth: true
+        validate_certs: "{{ aap_validate_certs }}"
+        status_code: 204
+      when: controller_oauthtoken_url is defined

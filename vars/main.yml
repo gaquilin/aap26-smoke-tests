@@ -1,0 +1,44 @@
+---
+# Inventory hosts
+smoke_inventory_hosts:
+  - name: "<your_hostname>"
+    ansible_host: "<your_ansible_host>"
+    ansible_connection: "<your_ansible_connection>"
+
+# Project
+smoke_project_scm_url: "https://<your_scm_url>"
+smoke_project_scm_branch: "<your_scm_branch>"
+
+# Credential references
+smoke_project_scm_credential: "<your_scm_credential>"
+smoke_org_galaxy_credentials: []
+smoke_jt_playbook: "<your_playbook>.yml"
+smoke_jt_credentials: []
+
+# Playbook execution flags
+run_platform_availability: true
+run_iam_access_validation: true
+run_push_ee_to_hub: true
+run_register_ee: true
+run_create_organization: true
+run_project_sync: true
+run_create_inventory: true
+run_create_job_template: true
+run_launch_job_template: true
+run_create_workflow_template: true
+run_launch_workflow_template: true
+run_cleanup: true
+
+# Execution Environment tar file path
+smoke_ee_tar_path: "{{ playbook_dir }}/../templates/ee_definition/<your_ee_tar_file>.tar"
+smoke_ee_image_name: "<your_ee_image_name>"
+smoke_ee_image_tag: "<your_ee_image_tag>"
+
+# Email report settings
+smoke_report_email_enabled: true
+smoke_report_smtp_host: "<your_smtp_host>"
+smoke_report_smtp_port: <your_smtp_port>
+smoke_report_email_from: "<your_email@example.com>"
+smoke_report_email_to:
+  - "<your_recipient@example.com>"
+smoke_report_email_subject: "AAP 2.6 Smoke & Regression Test Report"

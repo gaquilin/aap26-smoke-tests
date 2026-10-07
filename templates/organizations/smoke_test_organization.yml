@@ -1,7 +1,5 @@
 ---
 controller_organizations:
-  - name: "Smoke_Test_Organization"
+  - name: "SMOKE-REG-TEST-Organization"
     description: "Organization created by AAP 2.6 Smoke Regression Test"
-    galaxy_credentials:
-      - "Automation Hub RH Certified Repository"
-      - "Automation Hub Published Repository"
+    galaxy_credentials: {{ smoke_org_galaxy_credentials | to_json }}

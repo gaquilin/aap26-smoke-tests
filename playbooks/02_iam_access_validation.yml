@@ -1,0 +1,83 @@
+---
+- name: "IAM Access Validation"
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  vars_files:
+    - ../credentials/credentials.yml
+    - ../vars/main.yml
+  vars:
+    reports_dir: "{{ playbook_dir }}/../reports/{{ ansible_date_time.date }}"
+
+  tasks:
+    - name: "Verify Gateway identity ({{ smoke_iam_username }})"
+      ansible.builtin.uri:
+        url: "https://{{ aap_hostname }}/api/gateway/v1/me/"
+        method: GET
+        user: "{{ smoke_iam_username }}"
+        password: "{{ smoke_iam_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ aap_validate_certs }}"
+        status_code: [200]
+        return_content: true
+        timeout: 30
+      register: gateway_me
+      ignore_errors: true
+
+    - name: "Verify Controller identity ({{ smoke_iam_username }})"
+      ansible.builtin.uri:
+        url: "https://{{ aap_hostname }}/api/controller/v2/me/"
+        method: GET
+        user: "{{ smoke_iam_username }}"
+        password: "{{ smoke_iam_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ aap_validate_certs }}"
+        status_code: [200]
+        return_content: true
+        timeout: 30
+      register: controller_me
+      ignore_errors: true
+
+    - name: "Extract user info from Controller response"
+      ansible.builtin.set_fact:
+        _iam_user: "{{ controller_me.json.results[0] | default({}) }}"
+      when: controller_me is success and (controller_me.json.results | default([]) | length > 0)
+
+    - name: "Set report status"
+      ansible.builtin.set_fact:
+        _overall_status: >-
+          {{ 'PASSED' if (gateway_me is success) and (controller_me is success) else 'FAILED' }}
+        _iam_username: "{{ _iam_user.username | default('N/A') }}"
+        _iam_is_superuser: "{{ _iam_user.is_superuser | default('N/A') }}"
+        _iam_is_system_auditor: "{{ _iam_user.is_system_auditor | default('N/A') }}"
+        _iam_ldap_dn: "{{ _iam_user.ldap_dn | default('') | ternary(_iam_user.ldap_dn | default(''), '(none)') }}"
+
+    - name: "Register test result"
+      ansible.builtin.set_fact:
+        smoke_test_results: >-
+          {{ smoke_test_results | default({}) | combine({
+            'iam_access_validation': {
+              'name': 'IAM Access Validation',
+              'status': _overall_status,
+              'details': 'User "' ~ _iam_username ~ '" validated — Superuser: ' ~ (_iam_is_superuser | string) ~ ', System Auditor: ' ~ (_iam_is_system_auditor | string) ~ ', LDAP DN: ' ~ _iam_ldap_dn
+              if _overall_status == 'PASSED'
+              else 'IAM validation failed for user "' ~ smoke_iam_username ~ '" — Gateway: ' ~ ('OK' if gateway_me is success else 'UNREACHABLE') ~ ', Controller: ' ~ ('OK' if controller_me is success else 'UNREACHABLE')
+            }
+          }) }}
+
+    - name: "Display test result"
+      ansible.builtin.debug:
+        msg: >-
+          IAM Access Validation: {{ _overall_status }}
+          | User: {{ _iam_username }}
+          | Superuser: {{ _iam_is_superuser }}
+          | System Auditor: {{ _iam_is_system_auditor }}
+          | LDAP DN: {{ _iam_ldap_dn }}
+
+    - name: "Assert IAM access is valid"
+      ansible.builtin.assert:
+        that:
+          - gateway_me is success
+          - controller_me is success
+        fail_msg: "IAM access validation failed for user '{{ smoke_iam_username }}'"
+        success_msg: "IAM access validated successfully for user '{{ smoke_iam_username }}'"

@@ -5,11 +5,12 @@
   gather_facts: true
   vars_files:
     - ../credentials/credentials.yml
+    - ../vars/main.yml
   vars:
     reports_dir: "{{ playbook_dir }}/../reports/{{ ansible_date_time.date }}"
 
   tasks:
-    - name: "Obtain OAuth token (standalone mode)"
+    - name: "Obtain OAuth token"
       ansible.builtin.uri:
         url: "https://{{ aap_hostname }}/api/controller/v2/tokens/"
         user: "{{ aap_username }}"
@@ -20,12 +21,11 @@
         status_code: 201
       register: _authtoken_res
       no_log: true
-      when: controller_oauthtoken is not defined
 
-    - name: "Set OAuth token (standalone mode)"
+    - name: "Set OAuth token"
       ansible.builtin.set_fact:
         controller_oauthtoken: "{{ _authtoken_res.json.token }}"
-      when: _authtoken_res is not skipped
+        controller_oauthtoken_url: "{{ _authtoken_res.json.url }}"
       no_log: true
 
     - name: "Find job template files (standalone mode)"
@@ -76,41 +76,18 @@
         _overall_status: "{{ 'PASSED' if jt_verify.results | rejectattr('failed', 'false') | list | length == 0 else 'FAILED' }}"
         _status_icon: "{{ '✅' if jt_verify.results | rejectattr('failed', 'false') | list | length == 0 else '❌' }}"
 
-    - name: "Save report"
-      ansible.builtin.copy:
-        content: |
-          # Create Job Template
-
-          **Date:** {{ ansible_date_time.iso8601 }}
-          **Result:** {{ _status_icon }} {{ _overall_status }}
-
-          ## Resources Created
-
-          {% for jt in _templates %}
-          ### Job Template: {{ jt.name }}
-
-          | Field | Value |
-          |---|---|
-          | **Resource Type** | Job Template |
-          | **Name** | {{ jt.name }} |
-          | **Organization** | {{ jt.organization | default('N/A') }} |
-          | **Project** | {{ jt.project | default('N/A') }} |
-          | **Playbook** | {{ jt.playbook | default('N/A') }} |
-          | **Inventory** | {{ jt.inventory | default('N/A') }} |
-          | **Execution Environment** | {{ jt.execution_environment | default('N/A') }} |
-          | **Job Type** | {{ jt.job_type | default('run') }} |
-          | **Concurrent Jobs** | {{ jt.allow_simultaneous | default(false) }} |
-
-          {% endfor %}
-          ## Verification
-
-          | Job Template | Found on AAP |
-          |---|---|
-          {% for result in jt_verify.results %}
-          | {{ result.item.name }} | {{ '✅ Yes' if result.json.count | int > 0 else '❌ No' }} |
-          {% endfor %}
-        dest: "{{ reports_dir }}/11_create_job_template_report.md"
-        mode: '0644'
+    - name: "Register test result"
+      ansible.builtin.set_fact:
+        smoke_test_results: >-
+          {{ smoke_test_results | default({}) | combine({
+            'create_job_template': {
+              'name': 'Create Job Template',
+              'status': _overall_status,
+              'details': 'Job Template "' ~ (_templates | map(attribute='name') | join('", "')) ~ '" has been created successfully on Automation Controller'
+              if _overall_status == 'PASSED'
+              else 'Failed to create Job Template(s) on Automation Controller'
+            }
+          }) }}
 
     - name: "Display test result"
       ansible.builtin.debug:
@@ -125,3 +102,14 @@
       loop: "{{ jt_verify.results }}"
       loop_control:
         label: "{{ item.item.name }}"
+
+    - name: "Delete OAuth token"
+      ansible.builtin.uri:
+        url: "https://{{ aap_hostname }}{{ controller_oauthtoken_url }}"
+        user: "{{ aap_username }}"
+        password: "{{ aap_password }}"
+        method: DELETE
+        force_basic_auth: true
+        validate_certs: "{{ aap_validate_certs }}"
+        status_code: 204
+      when: controller_oauthtoken_url is defined

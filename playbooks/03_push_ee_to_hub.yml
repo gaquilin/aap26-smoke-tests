@@ -1,52 +1,76 @@
 ---
-- name: "Push EE to Private Automation Hub"
+- name: "Load EE from Tar and Push to Private Automation Hub"
   hosts: localhost
   connection: local
   gather_facts: true
   vars_files:
     - ../credentials/credentials.yml
+    - ../vars/main.yml
   vars:
     reports_dir: "{{ playbook_dir }}/../reports/{{ ansible_date_time.date }}"
-    ee_image_name: "smoke-test-ee"
-    ee_image_tag: "latest"
+    ee_image_name: "{{ smoke_ee_image_name }}"
+    ee_image_tag: "{{ smoke_ee_image_tag }}"
+    ee_tar_path: "{{ smoke_ee_tar_path }}"
     ah_ee_namespace: "{{ aap_username }}"
+    ah_ee_full_image: "{{ ah_hostname }}/{{ ah_ee_namespace }}/{{ ee_image_name }}:{{ ee_image_tag }}"
 
   tasks:
-    - name: "Verify local EE image exists"
+    - name: "Verify tar file exists"
+      ansible.builtin.stat:
+        path: "{{ ee_tar_path }}"
+      register: _tar_stat
+
+    - name: "Fail if tar file is missing"
+      ansible.builtin.fail:
+        msg: "EE tar file not found at {{ ee_tar_path }}"
+      when: not _tar_stat.stat.exists
+
+    - name: "Load EE image from tar file"
+      containers.podman.podman_load:
+        input: "{{ ee_tar_path }}"
+      register: _load_result
+
+    - name: "Debug podman_load output"
+      ansible.builtin.debug:
+        var: _load_result
+
+    - name: "Identify loaded image name"
       ansible.builtin.command:
-        cmd: "podman images {{ ee_image_name }}:{{ ee_image_tag }} --format '{{ '{{' }}.ID{{ '}}' }}'"
-      register: local_image_check
+        cmd: "podman images --sort created --format '{{ '{{' }}.Repository{{ '}}' }}:{{ '{{' }}.Tag{{ '}}' }}' --noheading"
+      register: _images_list
       changed_when: false
-      failed_when: local_image_check.stdout | trim | length == 0
+
+    - name: "Set loaded image name"
+      ansible.builtin.set_fact:
+        _loaded_image_name: "{{ _images_list.stdout_lines[0] }}"
+
+    - name: "Display loaded image"
+      ansible.builtin.debug:
+        msg: "Loaded image from tar: {{ _loaded_image_name }}"
+
+    - name: "Tag loaded image for Private Automation Hub"
+      containers.podman.podman_tag:
+        image: "{{ _loaded_image_name }}"
+        target_names:
+          - "{{ ah_ee_full_image }}"
 
     - name: "Login to Private Automation Hub"
-      ansible.builtin.command:
-        cmd: >-
-          podman login
-          -u="{{ ah_username }}"
-          -p="{{ aap_password }}"
-          --tls-verify={{ ah_validate_certs | default(false) }}
-          {{ ah_hostname }}
-      register: hub_login
-      changed_when: false
+      containers.podman.podman_login:
+        registry: "{{ ah_hostname }}"
+        username: "{{ ah_username }}"
+        password: "{{ aap_password }}"
+        tlsverify: "{{ ah_validate_certs | default(false) }}"
       no_log: true
 
-    - name: "Tag image for Private Automation Hub"
-      ansible.builtin.command:
-        cmd: >-
-          podman tag
-          {{ ee_image_name }}:{{ ee_image_tag }}
-          {{ ah_hostname }}/{{ ah_ee_namespace }}/{{ ee_image_name }}:{{ ee_image_tag }}
-      register: tag_result
-
     - name: "Push image to Private Automation Hub"
-      ansible.builtin.command:
-        cmd: >-
-          podman push
-          --tls-verify={{ ah_validate_certs | default(false) }}
-          {{ ah_hostname }}/{{ ah_ee_namespace }}/{{ ee_image_name }}:{{ ee_image_tag }}
-      register: push_result
-      timeout: 300
+      containers.podman.podman_image:
+        name: "{{ ah_ee_full_image }}"
+        push: true
+        push_args:
+          dest: "{{ ah_hostname }}/{{ ah_ee_namespace }}/{{ ee_image_name }}"
+        tag: "{{ ee_image_tag }}"
+        tls_verify: "{{ ah_validate_certs | default(false) }}"
+      register: _push_result
 
     - name: "Verify EE is visible on Private Automation Hub"
       ansible.builtin.uri:
@@ -57,36 +81,26 @@
         force_basic_auth: true
         validate_certs: "{{ aap_validate_certs }}"
         status_code: [200]
-      register: hub_verify
+      register: _hub_verify
       ignore_errors: true
 
     - name: "Set report status"
       ansible.builtin.set_fact:
-        _overall_status: "{{ 'PASSED' if push_result is success else 'FAILED' }}"
-        _status_icon: "{{ '✅' if push_result is success else '❌' }}"
+        _overall_status: "{{ 'PASSED' if (_push_result is success) and (_hub_verify is success) else 'FAILED' }}"
 
-    - name: "Save report"
-      ansible.builtin.copy:
-        content: |
-          # Push EE to Private Automation Hub
-
-          **Date:** {{ ansible_date_time.iso8601 }}
-          **Result:** {{ _status_icon }} {{ _overall_status }}
-
-          ## Resources Created
-
-          ### Container Image: {{ ee_image_name }}:{{ ee_image_tag }}
-
-          | Field | Value |
-          |---|---|
-          | **Resource Type** | Container Image (EE) on Private Hub |
-          | **Image Tagged** | {{ ah_hostname }}/{{ ah_ee_namespace }}/{{ ee_image_name }}:{{ ee_image_tag }} |
-          | **Push Target** | Private Automation Hub ({{ ah_hostname }}) |
-          | **Push Status** | {{ 'SUCCESS' if push_result is success else 'FAILED' }} |
-          | **Hub Verification** | {{ 'VISIBLE' if hub_verify is success else 'NOT VERIFIED' }} |
-        dest: "{{ reports_dir }}/03_push_ee_to_hub_report.md"
-        mode: '0644'
+    - name: "Register test result"
+      ansible.builtin.set_fact:
+        smoke_test_results: >-
+          {{ smoke_test_results | default({}) | combine({
+            'load_and_push_ee': {
+              'name': 'Load & Push EE to Hub',
+              'status': _overall_status,
+              'details': 'Execution Environment image "' ~ _loaded_image_name ~ '" loaded from ' ~ (ee_tar_path | basename) ~ ' and pushed successfully to ' ~ ah_ee_full_image
+              if _push_result is success
+              else 'Failed to push Execution Environment image to ' ~ ah_hostname
+            }
+          }) }}
 
     - name: "Display test result"
       ansible.builtin.debug:
-        msg: "Push EE to Private Hub: {{ _overall_status }}"
+        msg: "Load & Push EE: {{ _overall_status }} | Source: {{ _loaded_image_name }} | Target: {{ ah_ee_full_image }}"

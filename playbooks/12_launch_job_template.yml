@@ -7,7 +7,7 @@
     - ../credentials/credentials.yml
   vars:
     reports_dir: "{{ playbook_dir }}/../reports/{{ ansible_date_time.date }}"
-    job_template_name: "Smoke Test Job Template"
+    job_template_name: "SMOKE-REG-TEST-Job-Template"
     job_wait_timeout: 300
     job_wait_interval: 10
 
@@ -103,33 +103,16 @@
         _overall_status: "{{ 'PASSED' if job_status.json.status == 'successful' else 'FAILED' }}"
         _status_icon: "{{ '✅' if job_status.json.status == 'successful' else '❌' }}"
 
-    - name: "Save report"
-      ansible.builtin.copy:
-        content: |
-          # Launch and Verify Job Template
-
-          **Date:** {{ ansible_date_time.iso8601 }}
-          **Result:** {{ _status_icon }} {{ _overall_status }}
-
-          ## Job Execution Details
-
-          | Field | Value |
-          |---|---|
-          | **Resource Type** | Job |
-          | **Job ID** | {{ _job_id }} |
-          | **Job Template** | {{ _jt_name }} |
-          | **Status** | {{ job_status.json.status }} |
-          | **Started** | {{ job_status.json.started | default('N/A') }} |
-          | **Finished** | {{ job_status.json.finished | default('N/A') }} |
-          | **Elapsed** | {{ job_status.json.elapsed | default('N/A') }}s |
-
-          ## Extra Variables Applied
-
-          ```yaml
-          {{ job_details.json.extra_vars | default('{}') }}
-          ```
-        dest: "{{ reports_dir }}/12_launch_job_template_report.md"
-        mode: '0644'
+    - name: "Register test result"
+      ansible.builtin.set_fact:
+        smoke_test_results: >-
+          {{ smoke_test_results | default({}) | combine({
+            'launch_job_template': {
+              'name': 'Launch Job Template',
+              'status': _overall_status,
+              'details': 'Job Template "' ~ _jt_name ~ '" launched successfully — Job ID: ' ~ _job_id ~ ', completed in ' ~ (job_status.json.elapsed | default('N/A') | string) ~ 's with status "' ~ job_status.json.status ~ '"'
+            }
+          }) }}
 
     - name: "Display test result"
       ansible.builtin.debug:

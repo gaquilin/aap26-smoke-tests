@@ -1,14 +1,15 @@
 ---
 controller_templates:
-  - name: "Smoke Test Job Template"
+  - name: "SMOKE-REG-TEST-Job-Template"
     description: "Job template for AAP 2.6 smoke regression testing"
-    organization: "Smoke_Test_Organization"
-    project: "Smoke Test Project"
-    playbook: "hello_world.yml"
-    inventory: "Smoke Test Inventory"
-    execution_environment: "Smoke Test EE"
-    credentials:
-      - "Smoke Test Custom Credential"
+    organization: "SMOKE-REG-TEST-Organization"
+    project: "SMOKE-REG-TEST-Project"
+    playbook: "{{ smoke_jt_playbook }}"
+    inventory: "SMOKE-REG-TEST-Inventory"
+    execution_environment: "SMOKE-REG-TEST-EE"
+{% if smoke_jt_credentials | default([]) | length > 0 %}
+    credentials: {{ smoke_jt_credentials | to_json }}
+{% endif %}
     job_type: "run"
     job_slice_count: 1
     ask_job_slice_count_on_launch: true

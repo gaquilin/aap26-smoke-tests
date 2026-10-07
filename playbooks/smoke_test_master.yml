@@ -5,6 +5,7 @@
   gather_facts: true
   vars_files:
     - ../credentials/credentials.yml
+    - ../vars/main.yml
   vars:
     templates_dir: "{{ playbook_dir }}/../templates"
     reports_dir: "{{ playbook_dir }}/../reports/{{ ansible_date_time.date }}"
@@ -15,23 +16,6 @@
         path: "{{ reports_dir }}"
         state: directory
         mode: '0755'
-
-    - name: "Obtain OAuth token from AAP 2.6"
-      ansible.builtin.uri:
-        url: "https://{{ aap_hostname }}/api/controller/v2/tokens/"
-        user: "{{ aap_username }}"
-        password: "{{ aap_password }}"
-        method: POST
-        force_basic_auth: true
-        validate_certs: "{{ aap_validate_certs }}"
-        status_code: 201
-      register: _authtoken_res
-      no_log: true
-
-    - name: "Set OAuth token facts"
-      ansible.builtin.set_fact:
-        controller_oauthtoken: "{{ _authtoken_res.json.token }}"
-        controller_oauthtoken_url: "{{ _authtoken_res.json.url }}"
 
     - name: "Scan template files"
       ansible.builtin.find:
@@ -81,26 +65,6 @@
             all_yaml_data
             | selectattr('path', 'search', 'organizations')
             | map(attribute='content.controller_organizations')
-            | select('defined')
-            | reject('none')
-            | flatten
-            | list
-          }}
-        smoke_credential_types: >-
-          {{
-            all_yaml_data
-            | selectattr('path', 'search', 'credential_types')
-            | map(attribute='content.controller_credential_types')
-            | select('defined')
-            | reject('none')
-            | flatten
-            | list
-          }}
-        smoke_credentials: >-
-          {{
-            all_yaml_data
-            | selectattr('path', 'search', 'credentials/')
-            | map(attribute='content.controller_credentials')
             | select('defined')
             | reject('none')
             | flatten
@@ -173,8 +137,6 @@
           - "=== AAP 2.6 Smoke Test - Resource Summary ==="
           - "Execution Environments: {{ smoke_execution_environments | length }}"
           - "Organizations:          {{ smoke_organizations | length }}"
-          - "Credential Types:       {{ smoke_credential_types | length }}"
-          - "Credentials:            {{ smoke_credentials | length }}"
           - "Projects:               {{ smoke_projects | length }}"
           - "Inventories:            {{ smoke_inventories | length }}"
           - "Inventory Sources:      {{ smoke_inventory_sources | length }}"
@@ -182,57 +144,95 @@
           - "Job Templates:          {{ smoke_job_templates | length }}"
           - "Workflow Templates:     {{ smoke_workflows | length }}"
 
-    - name: "Save Data Processing report"
-      ansible.builtin.copy:
-        content: |
-          # Data Processing
-
-          **Date:** {{ ansible_date_time.iso8601 }}
-          **Result:** ✅ COMPLETED
-
-          ## Templates Loaded
-
-          {{ template_files.files | length }} template files loaded from `templates/` directory.
-
-          ## Resources Extracted
-
-          | Resource Type | Count |
-          |---|---|
-          | Execution Environments | {{ smoke_execution_environments | length }} |
-          | Organizations | {{ smoke_organizations | length }} |
-          | Credential Types | {{ smoke_credential_types | length }} |
-          | Credentials | {{ smoke_credentials | length }} |
-          | Projects | {{ smoke_projects | length }} |
-          | Inventories | {{ smoke_inventories | length }} |
-          | Inventory Sources | {{ smoke_inventory_sources | length }} |
-          | Hosts | {{ smoke_hosts | length }} |
-          | Job Templates | {{ smoke_job_templates | length }} |
-          | Workflow Templates | {{ smoke_workflows | length }} |
-        dest: "{{ reports_dir }}/00_data_processing_report.md"
-        mode: '0644'
+    - name: "Register data processing result"
+      ansible.builtin.set_fact:
+        smoke_test_results: >-
+          {{ smoke_test_results | default({}) | combine({
+            'data_processing': {
+              'name': 'Data Processing',
+              'status': 'PASSED',
+              'details': (template_files.files | length | string) ~ ' templates loaded',
+              'resources': [
+                {'type': 'Execution Environments', 'count': smoke_execution_environments | length},
+                {'type': 'Organizations', 'count': smoke_organizations | length},
+                {'type': 'Projects', 'count': smoke_projects | length},
+                {'type': 'Inventories', 'count': smoke_inventories | length},
+                {'type': 'Hosts', 'count': smoke_hosts | length},
+                {'type': 'Job Templates', 'count': smoke_job_templates | length},
+                {'type': 'Workflow Templates', 'count': smoke_workflows | length}
+              ]
+            }
+          }) }}
 
 - import_playbook: 01_platform_availability.yml
+  when: run_platform_availability | default(true) | bool
 
-- import_playbook: 02_build_custom_ee.yml
+- import_playbook: 02_iam_access_validation.yml
+  when: run_iam_access_validation | default(true) | bool
 
 - import_playbook: 03_push_ee_to_hub.yml
+  when: run_push_ee_to_hub | default(true) | bool
 
 - import_playbook: 04_register_ee.yml
+  when: run_register_ee | default(true) | bool
 
 - import_playbook: 05_create_organization.yml
-
-- import_playbook: 08_create_credential_type.yml
-
-- import_playbook: 06_create_credentials.yml
+  when: run_create_organization | default(true) | bool
 
 - import_playbook: 07_project_sync.yml
+  when: run_project_sync | default(true) | bool
 
 - import_playbook: 10_create_inventory.yml
+  when: run_create_inventory | default(true) | bool
 
 - import_playbook: 11_create_job_template.yml
+  when: run_create_job_template | default(true) | bool
 
 - import_playbook: 12_launch_job_template.yml
+  when: run_launch_job_template | default(true) | bool
 
 - import_playbook: 13_create_workflow_template.yml
+  when: run_create_workflow_template | default(true) | bool
 
 - import_playbook: 14_launch_workflow_template.yml
+  when: run_launch_workflow_template | default(true) | bool
+
+- import_playbook: 99_cleanup.yml
+  when: run_cleanup | default(true) | bool
+
+- name: "Generate Smoke Test Report"
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  vars_files:
+    - ../credentials/credentials.yml
+    - ../vars/main.yml
+  vars:
+    reports_dir: "{{ playbook_dir }}/../reports/{{ ansible_date_time.date }}"
+  tasks:
+    - name: "Ensure reports directory exists"
+      ansible.builtin.file:
+        path: "{{ reports_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: "Generate HTML report"
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../templates/reports/smoke_test_report.html.j2"
+        dest: "{{ reports_dir }}/smoke_test_report.html"
+        mode: '0644'
+
+    - name: "Display report location"
+      ansible.builtin.debug:
+        msg: "Report generated: {{ reports_dir }}/smoke_test_report.html"
+
+    - name: "Send report via email"
+      community.general.mail:
+        host: "{{ smoke_report_smtp_host }}"
+        port: "{{ smoke_report_smtp_port }}"
+        from: "{{ smoke_report_email_from }}"
+        to: "{{ smoke_report_email_to }}"
+        subject: "{{ smoke_report_email_subject }} - {{ ansible_date_time.date }}"
+        subtype: html
+        body: "{{ lookup('file', reports_dir ~ '/smoke_test_report.html') }}"
+      when: smoke_report_email_enabled | default(false) | bool

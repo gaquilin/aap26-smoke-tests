@@ -71,31 +71,18 @@
              and (instances_result is success)
              else '❌' }}
 
-    - name: "Save report"
-      ansible.builtin.copy:
-        content: |
-          # Platform Availability and Login
-
-          **Date:** {{ ansible_date_time.iso8601 }}
-          **Result:** {{ _status_icon }} {{ _overall_status }}
-
-          ## Endpoint Results
-
-          | Endpoint | Status |
-          |---|---|
-          {% for result in ping_results.results %}
-          | {{ result.item.name }} | HTTP {{ result.status | default('N/A') }} |
-          {% endfor %}
-
-          ## Details
-
-          | Check | Result |
-          |---|---|
-          | Authentication | {{ 'PASSED' if auth_result is success else 'FAILED' }} |
-          | Instances Count | {{ (instances_result.json.count | default(0)) if instances_result is success else 0 }} |
-          | AAP Hostname | {{ aap_hostname }} |
-        dest: "{{ reports_dir }}/01_platform_availability_report.md"
-        mode: '0644'
+    - name: "Register test result"
+      ansible.builtin.set_fact:
+        smoke_test_results: >-
+          {{ smoke_test_results | default({}) | combine({
+            'platform_availability': {
+              'name': 'Platform Availability',
+              'status': _overall_status,
+              'details': 'All AAP 2.6 platform endpoints (Gateway, Controller, Hub, EDA) are reachable and authentication is successful — ' ~ (ping_results.results | selectattr('status', 'equalto', 200) | list | length | string) ~ '/' ~ (aap_endpoints | length | string) ~ ' endpoints responding'
+              if _overall_status == 'PASSED'
+              else 'Platform availability check failed — ' ~ (ping_results.results | selectattr('status', 'equalto', 200) | list | length | string) ~ '/' ~ (aap_endpoints | length | string) ~ ' endpoints responding, Auth: ' ~ ('OK' if auth_result is success else 'FAILED')
+            }
+          }) }}
 
     - name: "Display test result"
       ansible.builtin.debug:

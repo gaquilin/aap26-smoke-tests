@@ -1,12 +1,12 @@
 ---
 controller_projects:
-  - name: "Smoke Test Project"
+  - name: "SMOKE-REG-TEST-Project"
     description: "Project for AAP 2.6 smoke regression testing"
-    organization: "Smoke_Test_Organization"
+    organization: "SMOKE-REG-TEST-Organization"
     scm_type: "git"
-    scm_url: "CHANGEME_SCM_URL"
-    scm_branch: "CHANGEME_SCM_BRANCH"
-    scm_credential: "Smoke Test - GitHub SCM Credential"
+    scm_url: "{{ smoke_project_scm_url }}"
+    scm_branch: "{{ smoke_project_scm_branch }}"
+    scm_credential: "{{ smoke_project_scm_credential }}"
     scm_update_on_launch: false
     wait: true
     state: present

@@ -1,25 +1,16 @@
 ---
 controller_inventories:
-  - name: "Smoke Test Inventory"
+  - name: "SMOKE-REG-TEST-Inventory"
     description: "Inventory for AAP 2.6 smoke regression testing"
-    organization: "Smoke_Test_Organization"
-    state: present
-
-controller_inventory_sources:
-  - name: "Smoke Test Inventory Source"
-    description: "Inventory source from project for smoke testing"
-    inventory: "Smoke Test Inventory"
-    source: "scm"
-    source_project: "Smoke Test Project"
-    source_path: "inventory"
-    overwrite: true
-    overwrite_vars: true
-    update_on_launch: false
+    organization: "SMOKE-REG-TEST-Organization"
     state: present
 
 controller_hosts:
-  - name: "localhost"
-    inventory: "Smoke Test Inventory"
+{% for host in smoke_inventory_hosts %}
+  - name: "{{ host.name }}"
+    inventory: "SMOKE-REG-TEST-Inventory"
     variables:
-      ansible_connection: local
+      ansible_host: "{{ host.ansible_host | default(host.name) }}"
+      ansible_connection: "{{ host.ansible_connection | default('local') }}"
     state: present
+{% endfor %}

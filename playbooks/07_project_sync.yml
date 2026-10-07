@@ -5,11 +5,12 @@
   gather_facts: true
   vars_files:
     - ../credentials/credentials.yml
+    - ../vars/main.yml
   vars:
     reports_dir: "{{ playbook_dir }}/../reports/{{ ansible_date_time.date }}"
 
   tasks:
-    - name: "Obtain OAuth token (standalone mode)"
+    - name: "Obtain OAuth token"
       ansible.builtin.uri:
         url: "https://{{ aap_hostname }}/api/controller/v2/tokens/"
         user: "{{ aap_username }}"
@@ -20,12 +21,11 @@
         status_code: 201
       register: _authtoken_res
       no_log: true
-      when: controller_oauthtoken is not defined
 
-    - name: "Set OAuth token (standalone mode)"
+    - name: "Set OAuth token"
       ansible.builtin.set_fact:
         controller_oauthtoken: "{{ _authtoken_res.json.token }}"
-      when: _authtoken_res is not skipped
+        controller_oauthtoken_url: "{{ _authtoken_res.json.url }}"
       no_log: true
 
     - name: "Find project templates (standalone mode)"
@@ -95,39 +95,18 @@
                   | selectattr('status', 'equalto', 'successful') | list | length > 0)
              else 'FAILED' }}
 
-    - name: "Save report"
-      ansible.builtin.copy:
-        content: |
-          # Project Synchronization
-
-          **Date:** {{ ansible_date_time.iso8601 }}
-          **Result:** {{ '✅' if _overall_status == 'PASSED' else '❌' }} {{ _overall_status }}
-
-          ## Resources Created
-
-          {% for proj in _projects %}
-          ### Project: {{ proj.name }}
-
-          | Field | Value |
-          |---|---|
-          | **Resource Type** | Project |
-          | **Name** | {{ proj.name }} |
-          | **Organization** | {{ proj.organization | default('N/A') }} |
-          | **SCM Type** | {{ proj.scm_type | default('N/A') }} |
-          | **SCM URL** | {{ proj.scm_url | default('N/A') }} |
-          | **SCM Branch** | {{ proj.scm_branch | default('N/A') }} |
-          | **SCM Credential** | {{ proj.scm_credential | default('N/A') }} |
-
-          {% endfor %}
-          ## Verification
-
-          | Project | Sync Status |
-          |---|---|
-          {% for result in project_verify.results %}
-          | {{ result.item.name }} | {{ result.json.results[0].status | default('unknown') if result.json.count | int > 0 else 'NOT FOUND' }} |
-          {% endfor %}
-        dest: "{{ reports_dir }}/07_project_sync_report.md"
-        mode: '0644'
+    - name: "Register test result"
+      ansible.builtin.set_fact:
+        smoke_test_results: >-
+          {{ smoke_test_results | default({}) | combine({
+            'project_sync': {
+              'name': 'Project Synchronization',
+              'status': _overall_status,
+              'details': 'Project "' ~ (_projects | map(attribute='name') | join('", "')) ~ '" has been created and synchronized successfully from SCM'
+              if _overall_status == 'PASSED'
+              else 'Failed to create or synchronize Project(s) from SCM'
+            }
+          }) }}
 
     - name: "Display test result"
       ansible.builtin.debug:
@@ -143,3 +122,14 @@
       loop: "{{ project_verify.results }}"
       loop_control:
         label: "{{ item.item.name }}"
+
+    - name: "Delete OAuth token"
+      ansible.builtin.uri:
+        url: "https://{{ aap_hostname }}{{ controller_oauthtoken_url }}"
+        user: "{{ aap_username }}"
+        password: "{{ aap_password }}"
+        method: DELETE
+        force_basic_auth: true
+        validate_certs: "{{ aap_validate_certs }}"
+        status_code: 204
+      when: controller_oauthtoken_url is defined

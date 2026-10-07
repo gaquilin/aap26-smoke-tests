@@ -7,3 +7,5 @@ collections:
   - name: ansible.utils
   - name: ansible.hub
   - name: ansible.eda
+  - name: containers.podman
+  - name: community.general

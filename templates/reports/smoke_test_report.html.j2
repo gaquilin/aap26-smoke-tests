@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AAP 2.6 Smoke &amp; Regression Test Report</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f4f5f7;font-family:Segoe UI,Roboto,Helvetica Neue,Arial,sans-serif;color:#333;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f5f7;padding:24px 0;">
+<tr><td align="center">
+<table role="presentation" width="720" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.08);overflow:hidden;">
+
+<tr>
+<td style="background-color:#1a1a2e;padding:32px 40px;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+  <tr>
+    <td>
+      <h1 style="margin:0 0 4px 0;font-size:22px;font-weight:700;color:#ffffff;letter-spacing:0.5px;">AAP 2.6 — Smoke &amp; Regression Test Report</h1>
+      <p style="margin:0;font-size:13px;color:#a0a0b8;">Automated Platform Validation</p>
+    </td>
+  </tr>
+  </table>
+</td>
+</tr>
+
+{% set results = smoke_test_results | default({}) %}
+{% set all_statuses = results.values() | map(attribute='status') | list %}
+{% set failed_count = all_statuses | select('equalto', 'FAILED') | list | length %}
+{% set passed_count = all_statuses | select('equalto', 'PASSED') | list | length %}
+{% set skipped_count = all_statuses | select('equalto', 'SKIPPED') | list | length %}
+{% set total_count = all_statuses | length %}
+{% set overall = 'PASSED' if failed_count == 0 and passed_count > 0 else ('FAILED' if failed_count > 0 else 'NO TESTS RUN') %}
+{% set overall_color = '#0d7a3e' if overall == 'PASSED' else ('#c0392b' if overall == 'FAILED' else '#7f8c8d') %}
+<tr>
+<td style="padding:28px 40px 0 40px;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e8e8ef;border-radius:6px;overflow:hidden;">
+  <tr>
+    <td style="padding:16px 20px;background-color:#fafbfc;border-bottom:1px solid #e8e8ef;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+      <tr>
+        <td style="font-size:13px;color:#666;">
+          <strong style="color:#333;">Date:</strong> {{ ansible_date_time.iso8601 }}<br>
+          <strong style="color:#333;">AAP Host:</strong> {{ aap_hostname }}<br>
+          <strong style="color:#333;">Executed by:</strong> {{ aap_username | default('N/A') }}
+        </td>
+        <td align="right" valign="top">
+          <span style="display:inline-block;padding:6px 18px;border-radius:4px;font-size:14px;font-weight:700;color:#fff;background-color:{{ overall_color }};">
+            {{ overall }}
+          </span>
+        </td>
+      </tr>
+      </table>
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:14px 20px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+      <tr>
+        <td align="center" width="33%" style="padding:8px 0;">
+          <span style="font-size:28px;font-weight:700;color:#0d7a3e;">{{ passed_count }}</span><br>
+          <span style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;">Passed</span>
+        </td>
+        <td align="center" width="33%" style="padding:8px 0;">
+          <span style="font-size:28px;font-weight:700;color:#c0392b;">{{ failed_count }}</span><br>
+          <span style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;">Failed</span>
+        </td>
+        <td align="center" width="33%" style="padding:8px 0;">
+          <span style="font-size:28px;font-weight:700;color:#7f8c8d;">{{ skipped_count }}</span><br>
+          <span style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;">Skipped</span>
+        </td>
+      </tr>
+      </table>
+    </td>
+  </tr>
+  </table>
+</td>
+</tr>
+
+{% set test_order = [
+  'platform_availability',
+  'iam_access_validation',
+  'load_and_push_ee',
+  'register_ee',
+  'create_organization',
+  'project_sync',
+  'create_inventory',
+  'create_job_template',
+  'launch_job_template',
+  'create_workflow_template',
+  'launch_workflow_template',
+  'cleanup'
+] %}
+<tr>
+<td style="padding:28px 40px 0 40px;">
+  <h2 style="margin:0 0 12px 0;font-size:16px;font-weight:600;color:#1a1a2e;border-bottom:2px solid #1a1a2e;padding-bottom:8px;">Test Results Summary</h2>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e8e8ef;border-radius:6px;overflow:hidden;">
+  <tr style="background-color:#f0f1f5;">
+    <td style="padding:10px 16px;font-size:12px;font-weight:600;color:#555;text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #e8e8ef;">Test</td>
+    <td style="padding:10px 16px;font-size:12px;font-weight:600;color:#555;text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #e8e8ef;" width="100">Status</td>
+    <td style="padding:10px 16px;font-size:12px;font-weight:600;color:#555;text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #e8e8ef;">Details</td>
+  </tr>
+  {% for key in test_order %}
+  {% if results[key] is defined %}
+  {% set t = results[key] %}
+  {% set row_bg = '#ffffff' if loop.index is odd else '#fafbfc' %}
+  {% set status_color = '#0d7a3e' if t.status == 'PASSED' else ('#c0392b' if t.status == 'FAILED' else '#7f8c8d') %}
+  {% set status_bg = '#e6f4ec' if t.status == 'PASSED' else ('#fde8e8' if t.status == 'FAILED' else '#f0f0f0') %}
+  <tr style="background-color:{{ row_bg }};">
+    <td style="padding:10px 16px;font-size:13px;color:#333;border-bottom:1px solid #f0f0f0;">{{ t.name }}</td>
+    <td style="padding:10px 16px;border-bottom:1px solid #f0f0f0;">
+      <span style="display:inline-block;padding:3px 10px;border-radius:3px;font-size:11px;font-weight:700;color:{{ status_color }};background-color:{{ status_bg }};">{{ t.status }}</span>
+    </td>
+    <td style="padding:10px 16px;font-size:12px;color:#666;border-bottom:1px solid #f0f0f0;">{{ t.details | default('') }}</td>
+  </tr>
+  {% endif %}
+  {% endfor %}
+  </table>
+</td>
+</tr>
+
+{% if smoke_test_results.data_processing is defined %}
+{% set dp = smoke_test_results.data_processing %}
+<tr>
+<td style="padding:28px 40px 0 40px;">
+  <h2 style="margin:0 0 12px 0;font-size:16px;font-weight:600;color:#1a1a2e;border-bottom:2px solid #1a1a2e;padding-bottom:8px;">Resources Processed</h2>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e8e8ef;border-radius:6px;overflow:hidden;">
+  <tr style="background-color:#f0f1f5;">
+    <td style="padding:8px 16px;font-size:12px;font-weight:600;color:#555;text-transform:uppercase;border-bottom:1px solid #e8e8ef;">Resource Type</td>
+    <td style="padding:8px 16px;font-size:12px;font-weight:600;color:#555;text-transform:uppercase;border-bottom:1px solid #e8e8ef;" width="80" align="center">Count</td>
+  </tr>
+  {% for item in dp.resources | default([]) %}
+  {% set row_bg = '#ffffff' if loop.index is odd else '#fafbfc' %}
+  <tr style="background-color:{{ row_bg }};">
+    <td style="padding:8px 16px;font-size:13px;color:#333;border-bottom:1px solid #f0f0f0;">{{ item.type }}</td>
+    <td style="padding:8px 16px;font-size:13px;color:#333;border-bottom:1px solid #f0f0f0;" align="center">{{ item.count }}</td>
+  </tr>
+  {% endfor %}
+  </table>
+</td>
+</tr>
+{% endif %}
+
+<tr>
+<td style="padding:32px 40px;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+  <tr>
+    <td style="border-top:1px solid #e8e8ef;padding-top:16px;font-size:11px;color:#999;text-align:center;">
+      Generated by <strong>AAP 2.6 Smoke &amp; Regression Test Suite</strong> on {{ ansible_date_time.iso8601 }}<br>
+      Host: {{ aap_hostname }} &mdash; Total tests: {{ total_count }} ({{ passed_count }} passed, {{ failed_count }} failed, {{ skipped_count }} skipped)
+    </td>
+  </tr>
+  </table>
+</td>
+</tr>
+
+</table>
+</td></tr>
+</table>
+</body>
+</html>

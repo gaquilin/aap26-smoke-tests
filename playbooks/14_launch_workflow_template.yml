@@ -7,7 +7,7 @@
     - ../credentials/credentials.yml
   vars:
     reports_dir: "{{ playbook_dir }}/../reports/{{ ansible_date_time.date }}"
-    workflow_template_name: "Smoke Test Workflow"
+    workflow_template_name: "SMOKE-REG-TEST-Workflow"
     workflow_wait_timeout: 300
     workflow_wait_interval: 10
 
@@ -90,35 +90,16 @@
         _overall_status: "{{ 'PASSED' if wf_status.json.status == 'successful' else 'FAILED' }}"
         _status_icon: "{{ '✅' if wf_status.json.status == 'successful' else '❌' }}"
 
-    - name: "Save report"
-      ansible.builtin.copy:
-        content: |
-          # Launch and Verify Workflow Job Template
-
-          **Date:** {{ ansible_date_time.iso8601 }}
-          **Result:** {{ _status_icon }} {{ _overall_status }}
-
-          ## Workflow Execution Details
-
-          | Field | Value |
-          |---|---|
-          | **Resource Type** | Workflow Job |
-          | **Workflow Job ID** | {{ _wf_job_id }} |
-          | **Workflow Template** | {{ _wf_name }} |
-          | **Status** | {{ wf_status.json.status }} |
-          | **Started** | {{ wf_status.json.started | default('N/A') }} |
-          | **Finished** | {{ wf_status.json.finished | default('N/A') }} |
-          | **Elapsed** | {{ wf_status.json.elapsed | default('N/A') }}s |
-
-          ## Workflow Nodes
-
-          | Node | Job Template | Status |
-          |---|---|---|
-          {% for node in wf_nodes.json.results | default([]) %}
-          | {{ node.identifier | default('node-' ~ loop.index) }} | {{ node.summary_fields.unified_job_template.name | default('N/A') }} | {{ node.summary_fields.job.status | default('N/A') if node.summary_fields.job is defined else 'not executed' }} |
-          {% endfor %}
-        dest: "{{ reports_dir }}/14_launch_workflow_template_report.md"
-        mode: '0644'
+    - name: "Register test result"
+      ansible.builtin.set_fact:
+        smoke_test_results: >-
+          {{ smoke_test_results | default({}) | combine({
+            'launch_workflow_template': {
+              'name': 'Launch Workflow Template',
+              'status': _overall_status,
+              'details': 'Workflow "' ~ _wf_name ~ '" launched successfully — Workflow Job ID: ' ~ _wf_job_id ~ ', completed in ' ~ (wf_status.json.elapsed | default('N/A') | string) ~ 's with status "' ~ wf_status.json.status ~ '"'
+            }
+          }) }}
 
     - name: "Display test result"
       ansible.builtin.debug:

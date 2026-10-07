@@ -1,13 +1,13 @@
 ---
 controller_workflows:
-  - name: "Smoke Test Workflow"
+  - name: "SMOKE-REG-TEST-Workflow"
     description: "Workflow Job Template for AAP 2.6 smoke regression testing"
-    organization: "Smoke_Test_Organization"
+    organization: "SMOKE-REG-TEST-Organization"
     ask_variables_on_launch: false
     allow_simultaneous: false
     simplified_workflow_nodes:
       - identifier: "run_smoke_test_job"
-        unified_job_template: "Smoke Test Job Template"
+        unified_job_template: "SMOKE-REG-TEST-Job-Template"
         success_nodes: []
         failure_nodes: []
         always_nodes: []

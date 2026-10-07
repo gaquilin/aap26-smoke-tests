@@ -1,7 +1,7 @@
 ---
 controller_execution_environments:
-  - name: "Smoke Test EE"
+  - name: "SMOKE-REG-TEST-EE"
     description: "Custom Execution Environment for AAP 2.6 smoke testing"
-    image: "{{ ah_hostname }}/{{ aap_username }}/smoke-test-ee:latest"
+    image: "{{ ah_hostname }}/{{ aap_username }}/{{ smoke_ee_image_name }}:{{ smoke_ee_image_tag }}"
     pull: "missing"
     state: present
