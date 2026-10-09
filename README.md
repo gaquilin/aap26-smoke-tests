@@ -196,6 +196,7 @@ Configure the following credentials and resources:
 2. A list of Organization Galaxy Credentials (optional)
 3. Job Template Playbook (mandatory)
 4. A list of Credentials required by the Job Template (optional)
+5. Machine Credential for Inventory Ad Hoc Ping test (optional — if not provided, the Ad Hoc Ping test is skipped)
 
 ```yaml
 smoke_project_scm_credential: "<your_scm_credential>"
@@ -203,6 +204,7 @@ smoke_org_galaxy_credentials:
   - "<your_org_galaxy_credential>"
 smoke_jt_playbook: "<your_playbook>.yml"
 smoke_jt_credentials: []
+smoke_inventory_credential: "<your_machine_credential>"  # optional
 ```
 
 #### Execution Flags

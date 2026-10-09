@@ -14,6 +14,7 @@ smoke_project_scm_credential: "<your_scm_credential>"
 smoke_org_galaxy_credentials: []
 smoke_jt_playbook: "<your_playbook>.yml"
 smoke_jt_credentials: []
+smoke_inventory_credential: "<your_inventory_credential>"
 
 # Playbook execution flags
 run_platform_availability: true

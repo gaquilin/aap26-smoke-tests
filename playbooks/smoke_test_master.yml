@@ -90,16 +90,6 @@
             | flatten
             | list
           }}
-        smoke_inventory_sources: >-
-          {{
-            all_yaml_data
-            | selectattr('path', 'search', 'inventories')
-            | map(attribute='content.controller_inventory_sources')
-            | select('defined')
-            | reject('none')
-            | flatten
-            | list
-          }}
         smoke_hosts: >-
           {{
             all_yaml_data
@@ -139,7 +129,6 @@
           - "Organizations:          {{ smoke_organizations | length }}"
           - "Projects:               {{ smoke_projects | length }}"
           - "Inventories:            {{ smoke_inventories | length }}"
-          - "Inventory Sources:      {{ smoke_inventory_sources | length }}"
           - "Hosts:                  {{ smoke_hosts | length }}"
           - "Job Templates:          {{ smoke_job_templates | length }}"
           - "Workflow Templates:     {{ smoke_workflows | length }}"

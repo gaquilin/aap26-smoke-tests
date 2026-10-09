@@ -24,11 +24,44 @@
 </tr>
 
 {% set results = smoke_test_results | default({}) %}
-{% set all_statuses = results.values() | map(attribute='status') | list %}
-{% set failed_count = all_statuses | select('equalto', 'FAILED') | list | length %}
-{% set passed_count = all_statuses | select('equalto', 'PASSED') | list | length %}
-{% set skipped_count = all_statuses | select('equalto', 'SKIPPED') | list | length %}
-{% set total_count = all_statuses | length %}
+{% set test_order = [
+  'platform_availability',
+  'iam_access_validation',
+  'load_and_push_ee',
+  'register_ee',
+  'create_organization',
+  'project_sync',
+  'create_inventory',
+  'create_job_template',
+  'launch_job_template',
+  'create_workflow_template',
+  'launch_workflow_template',
+  'cleanup'
+] %}
+{% set test_names = {
+  'platform_availability': 'Platform Availability',
+  'iam_access_validation': 'IAM Access Validation',
+  'load_and_push_ee': 'Load & Push EE to Hub',
+  'register_ee': 'Register EE on Controller',
+  'create_organization': 'Create Organization',
+  'project_sync': 'Project Synchronization',
+  'create_inventory': 'Create Inventory',
+  'create_job_template': 'Create Job Template',
+  'launch_job_template': 'Launch Job Template',
+  'create_workflow_template': 'Create Workflow Template',
+  'launch_workflow_template': 'Launch Workflow Template',
+  'cleanup': 'Cleanup'
+} %}
+{% set test_statuses = [] %}
+{% for key in test_order %}
+{% if results[key] is defined %}
+{% set _ = test_statuses.append(results[key].status) %}
+{% endif %}
+{% endfor %}
+{% set failed_count = test_statuses | select('equalto', 'FAILED') | list | length %}
+{% set passed_count = test_statuses | select('equalto', 'PASSED') | list | length %}
+{% set skipped_count = test_order | reject('in', results.keys() | list) | list | length %}
+{% set total_count = test_order | length %}
 {% set overall = 'PASSED' if failed_count == 0 and passed_count > 0 else ('FAILED' if failed_count > 0 else 'NO TESTS RUN') %}
 {% set overall_color = '#0d7a3e' if overall == 'PASSED' else ('#c0392b' if overall == 'FAILED' else '#7f8c8d') %}
 <tr>
@@ -76,20 +109,6 @@
 </td>
 </tr>
 
-{% set test_order = [
-  'platform_availability',
-  'iam_access_validation',
-  'load_and_push_ee',
-  'register_ee',
-  'create_organization',
-  'project_sync',
-  'create_inventory',
-  'create_job_template',
-  'launch_job_template',
-  'create_workflow_template',
-  'launch_workflow_template',
-  'cleanup'
-] %}
 <tr>
 <td style="padding:28px 40px 0 40px;">
   <h2 style="margin:0 0 12px 0;font-size:16px;font-weight:600;color:#1a1a2e;border-bottom:2px solid #1a1a2e;padding-bottom:8px;">Test Results Summary</h2>
@@ -100,9 +119,9 @@
     <td style="padding:10px 16px;font-size:12px;font-weight:600;color:#555;text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #e8e8ef;">Details</td>
   </tr>
   {% for key in test_order %}
+  {% set row_bg = '#ffffff' if loop.index is odd else '#fafbfc' %}
   {% if results[key] is defined %}
   {% set t = results[key] %}
-  {% set row_bg = '#ffffff' if loop.index is odd else '#fafbfc' %}
   {% set status_color = '#0d7a3e' if t.status == 'PASSED' else ('#c0392b' if t.status == 'FAILED' else '#7f8c8d') %}
   {% set status_bg = '#e6f4ec' if t.status == 'PASSED' else ('#fde8e8' if t.status == 'FAILED' else '#f0f0f0') %}
   <tr style="background-color:{{ row_bg }};">
@@ -111,6 +130,14 @@
       <span style="display:inline-block;padding:3px 10px;border-radius:3px;font-size:11px;font-weight:700;color:{{ status_color }};background-color:{{ status_bg }};">{{ t.status }}</span>
     </td>
     <td style="padding:10px 16px;font-size:12px;color:#666;border-bottom:1px solid #f0f0f0;">{{ t.details | default('') }}</td>
+  </tr>
+  {% else %}
+  <tr style="background-color:{{ row_bg }};">
+    <td style="padding:10px 16px;font-size:13px;color:#999;border-bottom:1px solid #f0f0f0;">{{ test_names[key] }}</td>
+    <td style="padding:10px 16px;border-bottom:1px solid #f0f0f0;">
+      <span style="display:inline-block;padding:3px 10px;border-radius:3px;font-size:11px;font-weight:700;color:#7f8c8d;background-color:#f0f0f0;">SKIPPED</span>
+    </td>
+    <td style="padding:10px 16px;font-size:12px;color:#999;font-style:italic;border-bottom:1px solid #f0f0f0;">Test disabled via execution flag</td>
   </tr>
   {% endif %}
   {% endfor %}

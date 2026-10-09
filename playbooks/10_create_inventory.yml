@@ -1,5 +1,5 @@
 ---
-- name: "Create Inventory with Inventory Source"
+- name: "Create Inventory"
   hosts: localhost
   connection: local
   gather_facts: true
@@ -40,9 +40,6 @@
         smoke_inventories: >-
           {{ smoke_inventories | default([]) +
              ((lookup('template', item.path) | from_yaml).controller_inventories | default([])) }}
-        smoke_inventory_sources: >-
-          {{ smoke_inventory_sources | default([]) +
-             ((lookup('template', item.path) | from_yaml).controller_inventory_sources | default([])) }}
         smoke_hosts: >-
           {{ smoke_hosts | default([]) +
              ((lookup('template', item.path) | from_yaml).controller_hosts | default([])) }}
@@ -54,7 +51,6 @@
     - name: "Set inventory data"
       ansible.builtin.set_fact:
         _inventories: "{{ smoke_inventories | default([]) }}"
-        _inventory_sources: "{{ smoke_inventory_sources | default([]) }}"
         _hosts: "{{ smoke_hosts | default([]) }}"
 
     - name: "Create Inventories"
@@ -71,14 +67,6 @@
         controller_hosts: "{{ _hosts }}"
         aap_token: "{{ controller_oauthtoken }}"
       when: _hosts | length > 0
-
-    - name: "Create Inventory Sources"
-      ansible.builtin.include_role:
-        name: infra.aap_configuration.controller_inventory_sources
-      vars:
-        controller_inventory_sources: "{{ _inventory_sources }}"
-        aap_token: "{{ controller_oauthtoken }}"
-      when: _inventory_sources | length > 0
 
     - name: "Verify Inventory creation"
       ansible.builtin.uri:
@@ -113,9 +101,9 @@
       register: hosts_verify
       when: _inventory_id is defined
 
-    - name: "Look up a Machine credential for Ad Hoc command"
+    - name: "Look up Machine credential by name"
       ansible.builtin.uri:
-        url: "https://{{ controller_hostname }}/api/controller/v2/credentials/?credential_type__name=Machine&page_size=1"
+        url: "https://{{ controller_hostname }}/api/controller/v2/credentials/?name={{ smoke_inventory_credential | urlencode }}"
         method: GET
         user: "{{ controller_username }}"
         password: "{{ controller_password }}"
@@ -124,7 +112,9 @@
         status_code: [200]
         return_content: true
       register: machine_cred_lookup
-      when: _inventory_id is defined
+      when:
+        - _inventory_id is defined
+        - smoke_inventory_credential | default('') | length > 0
       ignore_errors: true
 
     - name: "Run Ad Hoc ping command"
@@ -146,6 +136,7 @@
       register: adhoc_result
       when:
         - _inventory_id is defined
+        - smoke_inventory_credential | default('') | length > 0
         - machine_cred_lookup is success
         - machine_cred_lookup.json.count | int > 0
       ignore_errors: true
@@ -167,6 +158,23 @@
       when: adhoc_result is success and adhoc_result.json is defined
       ignore_errors: true
 
+    - name: "Determine Ad Hoc ping status for report"
+      ansible.builtin.set_fact:
+        _adhoc_ping_status: >-
+          {% if smoke_inventory_credential | default('') | length == 0 -%}
+            skipped (no credential configured)
+          {%- elif machine_cred_lookup is not defined or machine_cred_lookup is skipped -%}
+            skipped (no credential configured)
+          {%- elif machine_cred_lookup is failed or (machine_cred_lookup.json.count | default(0) | int == 0) -%}
+            skipped (credential "{{ smoke_inventory_credential }}" not found)
+          {%- elif adhoc_status is defined and adhoc_status is not skipped and adhoc_status.json is defined -%}
+            {{ adhoc_status.json.status | default('unknown') }}
+          {%- elif adhoc_result is defined and adhoc_result is failed -%}
+            failed
+          {%- else -%}
+            not executed
+          {%- endif %}
+
     - name: "Set report status"
       ansible.builtin.set_fact:
         _overall_status: "{{ 'PASSED' if inv_verify.results | rejectattr('failed', 'false') | list | length == 0 else 'FAILED' }}"
@@ -179,7 +187,7 @@
             'create_inventory': {
               'name': 'Create Inventory',
               'status': _overall_status,
-              'details': 'Inventory "' ~ (_inventories | map(attribute='name') | join('", "')) ~ '" created successfully with ' ~ (((hosts_verify.json.count | default(0)) if hosts_verify is defined and hosts_verify is success else 0) | string) ~ ' host(s) — Ad Hoc ping: ' ~ ((adhoc_status.json.status | default('not executed')) if adhoc_status is defined else 'not executed')
+              'details': 'Inventory "' ~ (_inventories | map(attribute='name') | join('", "')) ~ '" created successfully with ' ~ (((hosts_verify.json.count | default(0)) if hosts_verify is defined and hosts_verify is success else 0) | string) ~ ' host(s) — Ad Hoc ping: ' ~ _adhoc_ping_status
               if _overall_status == 'PASSED'
               else 'Failed to create Inventory on Automation Controller'
             }
@@ -190,7 +198,7 @@
         msg: >-
           Create Inventory: {{ _overall_status }}
           | Hosts: {{ (hosts_verify.json.count | default(0)) if hosts_verify is defined and hosts_verify is success else 0 }}
-          | Ad Hoc Ping: {{ (adhoc_status.json.status | default('skipped')) if adhoc_status is defined and adhoc_status is not skipped else 'skipped' }}
+          | Ad Hoc Ping: {{ _adhoc_ping_status }}
 
     - name: "Delete OAuth token"
       ansible.builtin.uri:
