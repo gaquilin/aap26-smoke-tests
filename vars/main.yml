@@ -2,8 +2,9 @@
 # Inventory hosts
 smoke_inventory_hosts:
   - name: "<your_hostname>"
-    ansible_host: "<your_ansible_host>"
-    ansible_connection: "<your_ansible_connection>"
+    group: "<your_group>"              
+    ansible_host: "<your_host>"        
+    ansible_connection: "<connection>" 
 
 # Project
 smoke_project_scm_url: "https://<your_scm_url>"
@@ -42,4 +43,4 @@ smoke_report_smtp_port: <your_smtp_port>
 smoke_report_email_from: "<your_email@example.com>"
 smoke_report_email_to:
   - "<your_recipient@example.com>"
-smoke_report_email_subject: "AAP 2.6 Smoke & Regression Test Report"
+smoke_report_email_subject: "Smoke & Regression Test Report"

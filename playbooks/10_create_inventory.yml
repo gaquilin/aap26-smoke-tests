@@ -40,6 +40,9 @@
         smoke_inventories: >-
           {{ smoke_inventories | default([]) +
              ((lookup('template', item.path) | from_yaml).controller_inventories | default([])) }}
+        smoke_groups: >-
+          {{ smoke_groups | default([]) +
+             ((lookup('template', item.path) | from_yaml).controller_groups | default([])) }}
         smoke_hosts: >-
           {{ smoke_hosts | default([]) +
              ((lookup('template', item.path) | from_yaml).controller_hosts | default([])) }}
@@ -51,6 +54,7 @@
     - name: "Set inventory data"
       ansible.builtin.set_fact:
         _inventories: "{{ smoke_inventories | default([]) }}"
+        _groups: "{{ smoke_groups | default([]) }}"
         _hosts: "{{ smoke_hosts | default([]) }}"
 
     - name: "Create Inventories"
@@ -67,6 +71,14 @@
         controller_hosts: "{{ _hosts }}"
         aap_token: "{{ controller_oauthtoken }}"
       when: _hosts | length > 0
+
+    - name: "Create Groups and assign Hosts"
+      ansible.builtin.include_role:
+        name: infra.aap_configuration.controller_host_groups
+      vars:
+        controller_groups: "{{ _groups }}"
+        aap_token: "{{ controller_oauthtoken }}"
+      when: _groups | length > 0
 
     - name: "Verify Inventory creation"
       ansible.builtin.uri:

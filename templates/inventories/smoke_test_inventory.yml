@@ -5,12 +5,23 @@ controller_inventories:
     organization: "SMOKE-REG-TEST-Organization"
     state: present
 
+controller_groups:
+{% set group_names = smoke_inventory_hosts | selectattr('group', 'defined') | map(attribute='group') | unique | list %}
+{% for grp in group_names %}
+  - name: "{{ grp }}"
+    inventory: "SMOKE-REG-TEST-Inventory"
+    hosts: {{ smoke_inventory_hosts | selectattr('group', 'defined') | selectattr('group', 'equalto', grp) | map(attribute='name') | list | to_json }}
+    state: present
+{% endfor %}
+
 controller_hosts:
 {% for host in smoke_inventory_hosts %}
   - name: "{{ host.name }}"
     inventory: "SMOKE-REG-TEST-Inventory"
     variables:
       ansible_host: "{{ host.ansible_host | default(host.name) }}"
-      ansible_connection: "{{ host.ansible_connection | default('local') }}"
+{% if host.ansible_connection is defined %}
+      ansible_connection: "{{ host.ansible_connection }}"
+{% endif %}
     state: present
 {% endfor %}

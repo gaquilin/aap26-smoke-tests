@@ -90,6 +90,16 @@
             | flatten
             | list
           }}
+        smoke_groups: >-
+          {{
+            all_yaml_data
+            | selectattr('path', 'search', 'inventories')
+            | map(attribute='content.controller_groups')
+            | select('defined')
+            | reject('none')
+            | flatten
+            | list
+          }}
         smoke_hosts: >-
           {{
             all_yaml_data
@@ -129,6 +139,7 @@
           - "Organizations:          {{ smoke_organizations | length }}"
           - "Projects:               {{ smoke_projects | length }}"
           - "Inventories:            {{ smoke_inventories | length }}"
+          - "Groups:                 {{ smoke_groups | length }}"
           - "Hosts:                  {{ smoke_hosts | length }}"
           - "Job Templates:          {{ smoke_job_templates | length }}"
           - "Workflow Templates:     {{ smoke_workflows | length }}"
@@ -146,6 +157,7 @@
                 {'type': 'Organizations', 'count': smoke_organizations | length},
                 {'type': 'Projects', 'count': smoke_projects | length},
                 {'type': 'Inventories', 'count': smoke_inventories | length},
+                {'type': 'Groups', 'count': smoke_groups | length},
                 {'type': 'Hosts', 'count': smoke_hosts | length},
                 {'type': 'Job Templates', 'count': smoke_job_templates | length},
                 {'type': 'Workflow Templates', 'count': smoke_workflows | length}

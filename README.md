@@ -177,8 +177,30 @@ All configurable settings are in `vars/main.yml`:
 ```yaml
 smoke_inventory_hosts:
   - name: "<hostname>"
-    ansible_host: "<ansible_host>"
-    ansible_connection: "<ansible_connection>"
+    group: "<group_name>"          
+    ansible_host: "<host_address>" 
+    ansible_connection: "<type>"  
+```
+
+| Field | Required | Default | Description |
+|---|---|---|---|
+| `name` | Yes | — | Host name in the inventory |
+| `group` | No | — | Inventory group to assign the host to |
+| `ansible_host` | No | Value of `name` | Address used by Ansible to connect to the host |
+| `ansible_connection` | No | `ssh` (AAP 2.6 default) | Connection type |
+
+Example with multiple hosts and a group:
+
+```yaml
+smoke_inventory_hosts:
+  - name: "machine-01"
+    group: "group1"
+    ansible_host: "10.0.0.1"
+  - name: "machine-02"
+    group: "group2"
+    ansible_host: "10.0.0.2"
+  - name: "localhost"
+    ansible_connection: "local"
 ```
 
 #### Project SCM
