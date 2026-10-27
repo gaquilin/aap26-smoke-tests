@@ -176,6 +176,17 @@
       register: _del_ees
       ignore_errors: true
 
+    - name: "Delete EE repository from Private Automation Hub"
+      ansible.hub.ah_ee_repository:
+        name: "{{ aap_username }}/{{ smoke_ee_image_name }}"
+        state: absent
+        ah_host: "{{ aap_hostname }}"
+        ah_username: "{{ aap_username }}"
+        ah_password: "{{ aap_password }}"
+        validate_certs: "{{ aap_validate_certs }}"
+      register: _del_hub_ee
+      ignore_errors: true
+
     - name: "Delete Organizations"
       ansible.controller.organization:
         name: "{{ item.name }}"
@@ -189,9 +200,12 @@
       register: _del_organizations
       ignore_errors: true
 
-    - name: "Remove local EE image"
+    - name: "Remove local EE image tags"
       ansible.builtin.command:
-        cmd: "podman rmi {{ smoke_ee_image_name | default('smoke-reg-test-ee-minimal-rhel9') }}:{{ smoke_ee_image_tag | default('latest') }}"
+        cmd: "podman rmi {{ item }}"
+      loop:
+        - "localhost/{{ smoke_ee_image_name }}:{{ smoke_ee_image_tag }}"
+        - "{{ ah_hostname }}/{{ aap_username }}/{{ smoke_ee_image_name }}:{{ smoke_ee_image_tag }}"
       register: _del_local_ee
       changed_when: _del_local_ee.rc == 0
       failed_when: false

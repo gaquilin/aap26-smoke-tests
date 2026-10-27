@@ -34,15 +34,15 @@
       ansible.builtin.debug:
         var: _load_result
 
-    - name: "Identify loaded image name"
+    - name: "Read image name from tar manifest"
       ansible.builtin.command:
-        cmd: "podman images --sort created --format '{{ '{{' }}.Repository{{ '}}' }}:{{ '{{' }}.Tag{{ '}}' }}' --noheading"
-      register: _images_list
+        cmd: "tar -xOf {{ ee_tar_path }} manifest.json"
+      register: _tar_manifest
       changed_when: false
 
     - name: "Set loaded image name"
       ansible.builtin.set_fact:
-        _loaded_image_name: "{{ _images_list.stdout_lines[0] }}"
+        _loaded_image_name: "{{ (_tar_manifest.stdout | from_json)[0].RepoTags[0] }}"
 
     - name: "Display loaded image"
       ansible.builtin.debug:
@@ -53,6 +53,11 @@
         image: "{{ _loaded_image_name }}"
         target_names:
           - "{{ ah_ee_full_image }}"
+
+    - name: "Verify image is a valid EE (ansible-playbook present)"
+      ansible.builtin.command:
+        cmd: "podman run --rm --entrypoint '' {{ ah_ee_full_image }} ansible-playbook --version"
+      changed_when: false
 
     - name: "Login to Private Automation Hub"
       containers.podman.podman_login:
